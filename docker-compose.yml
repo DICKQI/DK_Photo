@@ -1,0 +1,22 @@
+services:
+  backend:
+    build:
+      context: ./backend
+    env_file:
+      - .env
+    environment:
+      DK_PHOTO_DATA_DIR: /app/data
+      DK_PHOTO_DEFAULT_LIBRARY_PATH: /photos
+    volumes:
+      - ${APP_DATA_PATH:-./data}:/app/data
+      - ${PHOTOS_PATH:-./photos}:/photos:ro
+    ports:
+      - "8000:8000"
+
+  frontend:
+    build:
+      context: ./frontend
+    depends_on:
+      - backend
+    ports:
+      - "8080:80"
