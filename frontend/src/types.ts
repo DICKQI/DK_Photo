@@ -15,6 +15,10 @@ export interface Library {
   last_scan_at: string | null;
 }
 
+export interface LibraryUpdate {
+  name?: string;
+}
+
 export interface Folder {
   id: number;
   library_id: number;
@@ -59,6 +63,7 @@ export interface ShareLink {
   title: string;
   asset_id: number | null;
   folder_id: number | null;
+  asset_ids: number[] | null;
   expires_at: string | null;
   revoked_at: string | null;
   created_at: string;
@@ -69,6 +74,7 @@ export interface PublicShare {
   title: string;
   asset_id: number | null;
   folder_id: number | null;
+  asset_ids: number[] | null;
   expires_at: string | null;
 }
 

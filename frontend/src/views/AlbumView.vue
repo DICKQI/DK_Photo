@@ -63,6 +63,15 @@
           </template>
         </nav>
         <div class="topbar-actions">
+          <button
+            v-if="currentFolder"
+            class="icon-button"
+            :class="{ active: selectionMode }"
+            :title="selectionMode ? t('album.cancelSelection') : t('album.selectPhotos')"
+            @click="toggleSelectionMode"
+          >
+            <ListChecks :size="18" />
+          </button>
           <label class="search-box" :class="{ searching: searchLoading }">
             <LoaderCircle v-if="searchLoading" class="spin" :size="17" />
             <Search v-else :size="17" />
@@ -209,6 +218,7 @@
           class="folder-card"
           :style="{ '--tile-index': folderIndex }"
           @click="openFolder(folder)"
+          @contextmenu.prevent="openContextMenu($event, folder)"
         >
           <div class="folder-cover">
             <img v-if="folder.cover_asset_id" :src="thumbnailUrl(folder.cover_asset_id, 'small')" alt="" loading="lazy" />
@@ -222,14 +232,14 @@
           v-for="(asset, index) in displayAssets"
           :key="asset.id"
           class="photo-tile"
+          :class="{ selected: selectedAssetIds.has(asset.id) }"
           :style="{ '--tile-index': childFolders.length + index }"
         >
-          <button class="photo-open" @click="openViewer(index)">
+          <button v-if="selectionMode" class="photo-select-overlay" @click="toggleAssetSelection(asset.id)">
             <span class="photo-thumb">
               <img :src="thumbnailUrl(asset.id, thumbSize)" :alt="asset.filename" loading="lazy" />
-              <span class="photo-hover">
-                <Maximize2 :size="17" />
-                {{ t('common.open') }}
+              <span class="photo-select-check" :class="{ checked: selectedAssetIds.has(asset.id) }">
+                <Check v-if="selectedAssetIds.has(asset.id)" :size="18" />
               </span>
             </span>
             <span class="photo-name">{{ asset.filename }}</span>
@@ -238,9 +248,25 @@
               <span>{{ formatBytes(asset.size) }}</span>
             </span>
           </button>
-          <button class="photo-quick-action" :title="t('album.copyShareLink')" @click="shareAsset(asset)">
-            <Share2 :size="17" />
-          </button>
+          <template v-else>
+            <button class="photo-open" @click="openViewer(index)">
+              <span class="photo-thumb">
+                <img :src="thumbnailUrl(asset.id, thumbSize)" :alt="asset.filename" loading="lazy" />
+                <span class="photo-hover">
+                  <Maximize2 :size="17" />
+                  {{ t('common.open') }}
+                </span>
+              </span>
+              <span class="photo-name">{{ asset.filename }}</span>
+              <span class="photo-meta">
+                <span>{{ assetDateLabel(asset) }}</span>
+                <span>{{ formatBytes(asset.size) }}</span>
+              </span>
+            </button>
+            <button class="photo-quick-action" :title="t('album.copyShareLink')" @click="shareAsset(asset)">
+              <Share2 :size="17" />
+            </button>
+          </template>
         </article>
       </section>
     </section>
@@ -254,6 +280,84 @@
       @share="shareAsset"
     />
     <p v-if="toastMessage" class="toast">{{ toastMessage }}</p>
+
+    <Teleport to="body">
+      <div v-if="selectionMode && selectedAssetIds.size > 0" class="selection-action-bar">
+        <span class="selection-count">
+          <Check :size="18" />
+          {{ selectedCountLabel }}
+        </span>
+        <div class="selection-actions">
+          <button class="secondary-button" @click="clearSelection">
+            <X :size="17" />
+            {{ t('album.cancelSelection') }}
+          </button>
+          <button class="primary-button" @click="shareSelectedAssets">
+            <Share2 :size="17" />
+            {{ t('album.shareSelected') }}
+          </button>
+        </div>
+      </div>
+    </Teleport>
+
+    <Teleport to="body">
+      <div
+        v-if="contextMenuFolder"
+        class="context-menu-backdrop"
+        @click="closeContextMenu"
+        @contextmenu.prevent="closeContextMenu"
+      />
+      <ul
+        v-if="contextMenuFolder"
+        class="context-menu"
+        :style="{ left: contextMenuPos.x + 'px', top: contextMenuPos.y + 'px' }"
+      >
+        <li>
+          <button @click="openCoverPicker(contextMenuFolder!)">
+            <Images :size="16" />
+            {{ t('album.changeCover') }}
+          </button>
+        </li>
+      </ul>
+    </Teleport>
+
+    <Teleport to="body">
+      <div v-if="coverPickerFolder" class="modal-backdrop" @click="closeCoverPicker">
+        <div class="cover-picker-modal" @click.stop>
+          <div class="modal-header">
+            <div>
+              <strong>{{ t('album.selectCoverPhoto') }}</strong>
+              <span class="modal-subtitle">{{ coverPickerFolder.name }}</span>
+            </div>
+            <button class="icon-button" :title="t('common.close')" @click="closeCoverPicker">
+              <X :size="18" />
+            </button>
+          </div>
+          <div v-if="coverPickerLoading" class="cover-picker-loading">
+            <LoaderCircle class="spin" :size="28" />
+            <span>{{ t('album.loadingPhotos') }}</span>
+          </div>
+          <div v-else-if="!coverPickerAssets.length" class="cover-picker-empty">
+            <ImageOff :size="32" />
+            <span>{{ t('album.noPhotosHere') }}</span>
+          </div>
+          <div v-else class="cover-picker-grid">
+            <button
+              v-for="asset in coverPickerAssets"
+              :key="asset.id"
+              class="cover-picker-item"
+              :class="{ selected: asset.id === coverPickerFolder.cover_asset_id }"
+              @click="selectCover(asset.id)"
+            >
+              <img :src="thumbnailUrl(asset.id, 'small')" :alt="asset.filename" loading="lazy" />
+              <span v-if="asset.id === coverPickerFolder.cover_asset_id" class="current-cover-badge">
+                {{ t('album.currentCover') }}
+              </span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </main>
 </template>
 
@@ -263,6 +367,7 @@ import { useRouter } from 'vue-router';
 import {
   ArrowDownAZ,
   ArrowUpAZ,
+  Check,
   ChevronRight,
   Clock,
   Folder,
@@ -272,6 +377,7 @@ import {
   ImageOff,
   Images,
   LayoutGrid,
+  ListChecks,
   LoaderCircle,
   LogOut,
   Maximize2,
@@ -318,6 +424,14 @@ let toastTimer: ReturnType<typeof setTimeout> | null = null;
 let searchTimer: ReturnType<typeof setTimeout> | null = null;
 let assetRequestId = 0;
 
+const contextMenuFolder = ref<FolderType | null>(null);
+const contextMenuPos = ref({ x: 0, y: 0 });
+const coverPickerFolder = ref<FolderType | null>(null);
+const coverPickerAssets = ref<Asset[]>([]);
+const coverPickerLoading = ref(false);
+const selectionMode = ref(false);
+const selectedAssetIds = ref(new Set<number>());
+
 const tileSize = computed(() => {
   if (thumbSize.value === 'small') return '150px';
   if (thumbSize.value === 'large') return '260px';
@@ -350,6 +464,10 @@ const libraryListSummary = computed(() => {
   if (!rootFolders.value.length) return t('album.noLibrariesAvailable');
   if (!libraryFilter.value.trim()) return formatCount(rootFolders.value.length, 'library');
   return t('admin.shownPartial', { shown: filteredRootFolders.value.length, total: rootFolders.value.length });
+});
+const selectedCountLabel = computed(() => {
+  const count = selectedAssetIds.value.size;
+  return t(count === 1 ? 'album.photoSelected' : 'album.photosSelected', { count });
 });
 
 watch(thumbSize, (value) => localStorage.setItem('dk-photo-thumb-size', value));
@@ -398,6 +516,8 @@ async function openFolder(folder: FolderType) {
   assetRequestId += 1;
   mobileTree.value = false;
   viewerIndex.value = null;
+  selectionMode.value = false;
+  selectedAssetIds.value = new Set();
   try {
     currentFolder.value = await api.folder(folder.id);
     childFolders.value = await api.folders(folder.id);
@@ -414,6 +534,8 @@ function goRoot() {
   cancelSearchTimer();
   searchLoading.value = false;
   mobileTree.value = false;
+  selectionMode.value = false;
+  selectedAssetIds.value = new Set();
   loadRoot();
 }
 
@@ -480,6 +602,83 @@ async function shareAsset(asset: Asset) {
     showToast(t('album.shareCopied'));
   } catch (err) {
     showToast(err instanceof Error ? err.message : t('album.unableCreateShare'));
+  }
+}
+
+function openContextMenu(event: MouseEvent, folder: FolderType) {
+  contextMenuFolder.value = folder;
+  contextMenuPos.value = { x: event.clientX, y: event.clientY };
+}
+
+function closeContextMenu() {
+  contextMenuFolder.value = null;
+}
+
+async function openCoverPicker(folder: FolderType) {
+  closeContextMenu();
+  coverPickerFolder.value = folder;
+  coverPickerLoading.value = true;
+  coverPickerAssets.value = [];
+  try {
+    coverPickerAssets.value = await api.assets(folder.id, '', true);
+  } catch (err) {
+    showToast(err instanceof Error ? err.message : t('album.unableLoadPhotos'));
+    coverPickerFolder.value = null;
+  } finally {
+    coverPickerLoading.value = false;
+  }
+}
+
+async function selectCover(assetId: number) {
+  if (!coverPickerFolder.value) return;
+  const folder = coverPickerFolder.value;
+  try {
+    const updated = await api.updateFolderCover(folder.id, assetId);
+    folder.cover_asset_id = updated.cover_asset_id;
+    const idx = childFolders.value.findIndex((f) => f.id === folder.id);
+    if (idx !== -1) childFolders.value[idx] = updated;
+    showToast(t('album.coverUpdated'));
+    coverPickerFolder.value = null;
+  } catch (err) {
+    showToast(err instanceof Error ? err.message : t('album.unableUpdateCover'));
+  }
+}
+
+function closeCoverPicker() {
+  coverPickerFolder.value = null;
+}
+
+function toggleSelectionMode() {
+  selectionMode.value = !selectionMode.value;
+  if (!selectionMode.value) {
+    selectedAssetIds.value = new Set();
+  }
+}
+
+function toggleAssetSelection(assetId: number) {
+  const next = new Set(selectedAssetIds.value);
+  if (next.has(assetId)) {
+    next.delete(assetId);
+  } else {
+    next.add(assetId);
+  }
+  selectedAssetIds.value = next;
+}
+
+function clearSelection() {
+  selectedAssetIds.value = new Set();
+}
+
+async function shareSelectedAssets() {
+  const ids = Array.from(selectedAssetIds.value);
+  if (!ids.length) return;
+  try {
+    const share = await api.createShare({ asset_ids: ids, title: '', expires_in_days: 7 });
+    await navigator.clipboard?.writeText(`${location.origin}/share/${share.token}`);
+    showToast(t('album.shareCopied'));
+    toggleSelectionMode();
+  } catch (err) {
+    showToast(err instanceof Error ? err.message : t('album.unableCreateMultiShare'));
   }
 }
 

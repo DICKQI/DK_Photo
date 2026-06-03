@@ -3,10 +3,12 @@ from __future__ import annotations
 from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, status
+from sqlalchemy import or_
 from sqlmodel import select
 
+from app.config import settings
 from app.deps import AdminUser, SessionDep
-from app.models import LibraryPermission, LibraryRoot, ScanJob, ShareLink, User
+from app.models import Asset, Folder, LibraryPermission, LibraryRoot, ScanJob, ShareAsset, ShareLink, Thumbnail, User
 from app.schemas import (
     FilesystemChildren,
     FilesystemRoots,
@@ -14,6 +16,7 @@ from app.schemas import (
     LibraryPermissionRead,
     LibraryPermissionUpdate,
     LibraryRead,
+    LibraryUpdate,
     PasswordReset,
     ScanJobRead,
     ShareRead,
@@ -59,6 +62,100 @@ def create_library(payload: LibraryCreate, request: Request, session: SessionDep
     if watcher:
         watcher.refresh()
     return library
+
+
+@router.patch("/libraries/{library_id}", response_model=LibraryRead)
+def update_library(library_id: int, payload: LibraryUpdate, session: SessionDep, _: AdminUser) -> LibraryRoot:
+    library = session.get(LibraryRoot, library_id)
+    if not library:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Library not found")
+    if payload.name is not None:
+        name = payload.name.strip()
+        if not name:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Library name is required")
+        library.name = name
+        root_folder = session.exec(
+            select(Folder).where(Folder.library_id == library_id, Folder.parent_id == None)
+        ).first()
+        if root_folder:
+            root_folder.name = name
+    session.commit()
+    session.refresh(library)
+    return library
+
+
+@router.delete("/libraries/{library_id}")
+def delete_library(library_id: int, request: Request, session: SessionDep, _: AdminUser) -> dict[str, bool]:
+    library = session.get(LibraryRoot, library_id)
+    if not library:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Library not found")
+
+    assets = session.exec(select(Asset).where(Asset.library_id == library_id)).all()
+    folders = session.exec(select(Folder).where(Folder.library_id == library_id)).all()
+    asset_ids = [asset.id for asset in assets if asset.id is not None]
+    folder_ids = [folder.id for folder in folders if folder.id is not None]
+
+    if asset_ids or folder_ids:
+        share_conditions = []
+        if asset_ids:
+            share_conditions.append(ShareLink.asset_id.in_(asset_ids))  # type: ignore[attr-defined]
+        if folder_ids:
+            share_conditions.append(ShareLink.folder_id.in_(folder_ids))  # type: ignore[attr-defined]
+        shares = session.exec(select(ShareLink).where(or_(*share_conditions))).all()
+        for share in shares:
+            session.delete(share)
+
+    if asset_ids:
+        multi_share_assets = session.exec(select(ShareAsset).where(ShareAsset.asset_id.in_(asset_ids))).all()
+        affected_share_ids = {sa.share_id for sa in multi_share_assets}
+        for sa in multi_share_assets:
+            session.delete(sa)
+        session.flush()
+        for sid in affected_share_ids:
+            remaining = session.exec(select(ShareAsset).where(ShareAsset.share_id == sid)).all()
+            if not remaining:
+                share = session.get(ShareLink, sid)
+                if share:
+                    session.delete(share)
+
+    if asset_ids:
+        thumbnails = session.exec(select(Thumbnail).where(Thumbnail.asset_id.in_(asset_ids))).all()  # type: ignore[attr-defined]
+        for thumbnail in thumbnails:
+            _unlink_thumbnail_file(thumbnail.path)
+            session.delete(thumbnail)
+
+    for folder in folders:
+        folder.cover_asset_id = None
+        folder.parent_id = None
+    session.flush()
+
+    for permission in session.exec(select(LibraryPermission).where(LibraryPermission.library_id == library_id)).all():
+        session.delete(permission)
+    for job in session.exec(select(ScanJob).where(ScanJob.library_id == library_id)).all():
+        session.delete(job)
+    for asset in assets:
+        session.delete(asset)
+    for folder in folders:
+        session.delete(folder)
+    session.delete(library)
+    session.commit()
+
+    watcher = getattr(request.app.state, "library_watcher", None)
+    if watcher:
+        watcher.refresh()
+    return {"ok": True}
+
+
+def _unlink_thumbnail_file(path: str) -> None:
+    try:
+        thumbnail_path = Path(path).resolve()
+        thumbnail_path.relative_to(settings.thumbnail_dir.resolve())
+    except (OSError, ValueError):
+        return
+    try:
+        thumbnail_path.unlink(missing_ok=True)
+    except OSError:
+        return
 
 
 @router.post("/libraries/{library_id}/scan", response_model=ScanJobRead)

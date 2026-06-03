@@ -4,11 +4,12 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 from PIL import Image
-from sqlmodel import Session, SQLModel, create_engine
+from sqlmodel import Session, SQLModel, create_engine, select
 
+from app.config import settings
 from app.db import get_session
 from app.main import app
-from app.models import LibraryPermission, LibraryRoot
+from app.models import Asset, Folder, LibraryPermission, LibraryRoot, ScanJob, ShareLink, Thumbnail, User
 from app.security import hash_password
 from app.services.scanner import scan_library
 
@@ -102,6 +103,103 @@ def test_admin_can_manage_users_and_permissions(tmp_path: Path) -> None:
         )
         assert permissions.status_code == 200
         assert permissions.json()[0]["can_share"] is True
+    app.dependency_overrides.clear()
+
+
+def test_admin_can_update_library_name(tmp_path: Path) -> None:
+    client, _ = isolated_client(tmp_path)
+    photo_root = tmp_path / "rename-photos"
+    create_photo(photo_root / "one.jpg")
+
+    with client:
+        login(client, "admin@example.com", "change-me-now")
+        library_response = client.post("/api/admin/libraries", json={"name": "Original name", "path": str(photo_root)})
+        assert library_response.status_code == 200, library_response.text
+        library_id = library_response.json()["id"]
+
+        update_response = client.patch(f"/api/admin/libraries/{library_id}", json={"name": "  Holiday Archive  "})
+        assert update_response.status_code == 200, update_response.text
+        assert update_response.json()["name"] == "Holiday Archive"
+
+        missing_response = client.patch("/api/admin/libraries/999999", json={"name": "Missing"})
+        assert missing_response.status_code == 404
+    app.dependency_overrides.clear()
+
+
+def test_member_cannot_update_or_delete_libraries(tmp_path: Path) -> None:
+    client, _ = isolated_client(tmp_path)
+    photo_root = tmp_path / "member-protected"
+    create_photo(photo_root / "one.jpg")
+
+    with client:
+        login(client, "admin@example.com", "change-me-now")
+        member = client.post(
+            "/api/admin/users",
+            json={
+                "email": f"member-admin-{tmp_path.name}@example.com",
+                "display_name": "Member",
+                "password": "password123",
+                "role": "member",
+            },
+        )
+        assert member.status_code == 200, member.text
+        library_response = client.post("/api/admin/libraries", json={"name": "Protected", "path": str(photo_root)})
+        assert library_response.status_code == 200, library_response.text
+        library_id = library_response.json()["id"]
+
+        login(client, f"member-admin-{tmp_path.name}@example.com", "password123")
+        update_response = client.patch(f"/api/admin/libraries/{library_id}", json={"name": "Nope"})
+        delete_response = client.delete(f"/api/admin/libraries/{library_id}")
+
+        assert update_response.status_code == 403
+        assert delete_response.status_code == 403
+    app.dependency_overrides.clear()
+
+
+def test_delete_library_removes_index_and_keeps_original_files(tmp_path: Path) -> None:
+    client, test_engine = isolated_client(tmp_path)
+    photo_root = tmp_path / "delete-photos"
+    original_photo = photo_root / "Trips" / "one.jpg"
+    create_photo(original_photo)
+    thumbnail_path = settings.thumbnail_dir / "pytest-delete" / f"{tmp_path.name}.webp"
+
+    with client:
+        login(client, "admin@example.com", "change-me-now")
+        library_response = client.post("/api/admin/libraries", json={"name": "Delete me", "path": str(photo_root)})
+        assert library_response.status_code == 200, library_response.text
+        library_id = library_response.json()["id"]
+
+        with Session(test_engine) as session:
+            scan_library(session, library_id)
+            asset = session.exec(select(Asset).where(Asset.library_id == library_id)).first()
+            folder = session.exec(select(Folder).where(Folder.library_id == library_id)).first()
+            admin = session.exec(select(User).where(User.email == "admin@example.com")).first()
+            assert asset is not None
+            assert folder is not None
+            assert admin is not None
+            thumbnail_path.parent.mkdir(parents=True, exist_ok=True)
+            thumbnail_path.write_bytes(b"thumbnail")
+            session.add(Thumbnail(asset_id=asset.id or 0, size="small", path=str(thumbnail_path), width=16, height=16))
+            session.add(LibraryPermission(user_id=admin.id or 0, library_id=library_id, can_view=True, can_share=True))
+            session.add(ScanJob(library_id=library_id, status="finished", message="Done"))
+            session.add(ShareLink(token=f"asset-{tmp_path.name}", creator_id=admin.id or 0, title="Asset share", asset_id=asset.id))
+            session.add(ShareLink(token=f"folder-{tmp_path.name}", creator_id=admin.id or 0, title="Folder share", folder_id=folder.id))
+            session.commit()
+
+        delete_response = client.delete(f"/api/admin/libraries/{library_id}")
+        assert delete_response.status_code == 200, delete_response.text
+        assert delete_response.json() == {"ok": True}
+
+        with Session(test_engine) as session:
+            assert session.get(LibraryRoot, library_id) is None
+            assert not session.exec(select(Asset).where(Asset.library_id == library_id)).all()
+            assert not session.exec(select(Folder).where(Folder.library_id == library_id)).all()
+            assert not session.exec(select(Thumbnail)).all()
+            assert not session.exec(select(LibraryPermission).where(LibraryPermission.library_id == library_id)).all()
+            assert not session.exec(select(ScanJob).where(ScanJob.library_id == library_id)).all()
+            assert not session.exec(select(ShareLink)).all()
+        assert original_photo.exists()
+        assert not thumbnail_path.exists()
     app.dependency_overrides.clear()
 
 

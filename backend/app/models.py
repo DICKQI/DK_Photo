@@ -90,6 +90,14 @@ class ShareLink(SQLModel, table=True):
     created_at: datetime = Field(default_factory=utc_now)
 
 
+class ShareAsset(SQLModel, table=True):
+    __table_args__ = (UniqueConstraint("share_id", "asset_id"),)
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    share_id: int = Field(foreign_key="sharelink.id", index=True)
+    asset_id: int = Field(foreign_key="asset.id", index=True)
+
+
 class ScanJob(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     library_id: int = Field(foreign_key="libraryroot.id", index=True)

@@ -37,7 +37,7 @@
     <button class="viewer-nav left" @click="previous" :title="t('viewer.previous')">
       <ChevronLeft :size="28" />
     </button>
-    <div class="viewer-stage" :class="{ loading: imageLoading, failed: !!imageError }" @wheel.prevent="handleWheel">
+    <div ref="stageRef" class="viewer-stage" :class="{ loading: imageLoading, failed: !!imageError, zoomed: zoom > 1 }" @wheel.prevent="handleWheel">
       <div v-if="hasMultipleAssets" class="viewer-context previous">
         <span>{{ t('viewer.previous') }}</span>
         <strong>{{ previousAsset.filename }}</strong>
@@ -59,16 +59,18 @@
           {{ t('common.retry') }}
         </button>
       </div>
-      <img
-        :key="imageKey"
-        class="viewer-image"
-        :class="{ zoomed: zoom > 1, loaded: !imageLoading && !imageError }"
-        :src="assetOriginalUrl(current)"
-        :alt="current.filename"
-        :style="{ transform: `scale(${zoom})` }"
-        @load="handleImageLoad"
-        @error="handleImageError"
-      />
+      <div class="viewer-image-frame" :style="imageFrameStyle">
+        <img
+          :key="imageKey"
+          class="viewer-image"
+          :class="{ zoomed: zoom > 1, loaded: !imageLoading && !imageError }"
+          :src="assetOriginalUrl(current)"
+          :alt="current.filename"
+          :style="imageStyle"
+          @load="handleImageLoad"
+          @error="handleImageError"
+        />
+      </div>
     </div>
     <button class="viewer-nav right" @click="next" :title="t('viewer.next')">
       <ChevronRight :size="28" />
@@ -133,6 +135,7 @@ const emit = defineEmits<{
 }>();
 
 const viewerRef = ref<HTMLElement | null>(null);
+const stageRef = ref<HTMLElement | null>(null);
 const filmstripRef = ref<HTMLElement | null>(null);
 const { t, formatDateTime } = useLocale();
 const showInfo = ref(true);
@@ -150,25 +153,66 @@ const zoom = ref(1);
 const imageLoading = ref(true);
 const imageError = ref('');
 const imageRetry = ref(0);
+const stageSize = ref({ width: 1, height: 1 });
+const imageNaturalSize = ref(assetImageSize(current.value));
 const zoomPercent = computed(() => `${Math.round(zoom.value * 100)}%`);
 const imageKey = computed(() => `${current.value.id}:${imageRetry.value}`);
+const fittedImageSize = computed(() => {
+  const naturalWidth = Math.max(1, imageNaturalSize.value.width);
+  const naturalHeight = Math.max(1, imageNaturalSize.value.height);
+  const stageWidth = Math.max(1, stageSize.value.width);
+  const stageHeight = Math.max(1, stageSize.value.height);
+  const fitScale = Math.min(stageWidth / naturalWidth, stageHeight / naturalHeight);
+  const safeFitScale = Number.isFinite(fitScale) && fitScale > 0 ? fitScale : 1;
+
+  return {
+    width: Math.max(1, Math.round(naturalWidth * safeFitScale * zoom.value)),
+    height: Math.max(1, Math.round(naturalHeight * safeFitScale * zoom.value)),
+  };
+});
+const imageStyle = computed(() => ({
+  width: `${fittedImageSize.value.width}px`,
+  height: `${fittedImageSize.value.height}px`,
+}));
+const imageFrameStyle = computed(() => ({
+  width: `${Math.max(stageSize.value.width, fittedImageSize.value.width)}px`,
+  height: `${Math.max(stageSize.value.height, fittedImageSize.value.height)}px`,
+}));
+let stageResizeObserver: ResizeObserver | null = null;
 
 watch(
   () => props.index,
   () => {
     resetZoom();
     resetImageState();
-    nextTick(scrollActiveThumbnailIntoView);
+    nextTick(() => {
+      updateStageSize();
+      scrollActiveThumbnailIntoView();
+    });
   },
 );
 
+watch(showInfo, () => {
+  nextTick(updateStageSize);
+});
+
 onMounted(() => {
-  nextTick(() => viewerRef.value?.focus());
+  nextTick(() => {
+    viewerRef.value?.focus();
+    updateStageSize();
+    if (stageRef.value && typeof ResizeObserver !== 'undefined') {
+      stageResizeObserver = new ResizeObserver(updateStageSize);
+      stageResizeObserver.observe(stageRef.value);
+    }
+  });
   window.addEventListener('keydown', handleKey);
+  window.addEventListener('resize', updateStageSize);
 });
 
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', handleKey);
+  window.removeEventListener('resize', updateStageSize);
+  stageResizeObserver?.disconnect();
 });
 
 function handleKey(event: KeyboardEvent) {
@@ -212,6 +256,7 @@ function resetZoom() {
 function resetImageState() {
   imageLoading.value = true;
   imageError.value = '';
+  imageNaturalSize.value = assetImageSize(current.value);
 }
 
 function handleWheel(event: WheelEvent) {
@@ -220,7 +265,12 @@ function handleWheel(event: WheelEvent) {
   if (event.deltaY > 0) zoomOut();
 }
 
-function handleImageLoad() {
+function handleImageLoad(event: Event) {
+  const image = event.target as HTMLImageElement;
+  imageNaturalSize.value = {
+    width: image.naturalWidth || current.value.width || 1,
+    height: image.naturalHeight || current.value.height || 1,
+  };
   imageLoading.value = false;
   imageError.value = '';
 }
@@ -248,6 +298,30 @@ function assetOriginalUrl(asset: Asset) {
 
 function assetThumbnailUrl(asset: Asset, size: string) {
   return props.thumbnailUrlFor?.(asset, size) ?? thumbnailUrl(asset.id, size);
+}
+
+function assetImageSize(asset: Asset) {
+  return {
+    width: Math.max(1, asset.width ?? 1),
+    height: Math.max(1, asset.height ?? 1),
+  };
+}
+
+function updateStageSize() {
+  const stage = stageRef.value;
+  if (!stage) return;
+  const styles = window.getComputedStyle(stage);
+  const horizontalPadding = parseCssPixels(styles.paddingLeft) + parseCssPixels(styles.paddingRight);
+  const verticalPadding = parseCssPixels(styles.paddingTop) + parseCssPixels(styles.paddingBottom);
+  stageSize.value = {
+    width: Math.max(1, stage.clientWidth - horizontalPadding),
+    height: Math.max(1, stage.clientHeight - verticalPadding),
+  };
+}
+
+function parseCssPixels(value: string) {
+  const parsed = Number.parseFloat(value);
+  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 function formatBytes(value: number) {

@@ -4,6 +4,7 @@ import type {
   FilesystemRoots,
   Folder,
   Library,
+  LibraryUpdate,
   LibraryPermission,
   PublicShare,
   ScanJob,
@@ -48,6 +49,15 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ name, path }),
     });
+  },
+  updateLibrary(libraryId: number, payload: LibraryUpdate) {
+    return request<Library>(`/api/admin/libraries/${libraryId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    });
+  },
+  deleteLibrary(libraryId: number) {
+    return request<{ ok: boolean }>(`/api/admin/libraries/${libraryId}`, { method: 'DELETE' });
   },
   scanLibrary(libraryId: number) {
     return request<ScanJob>(`/api/admin/libraries/${libraryId}/scan`, { method: 'POST' });
@@ -110,17 +120,24 @@ export const api = {
   folder(id: number) {
     return request<Folder>(`/api/folders/${id}`);
   },
-  assets(folderId: number | null, search = '') {
+  updateFolderCover(folderId: number, coverAssetId: number) {
+    return request<Folder>(`/api/folders/${folderId}/cover`, {
+      method: 'PATCH',
+      body: JSON.stringify({ cover_asset_id: coverAssetId }),
+    });
+  },
+  assets(folderId: number | null, search = '', recursive = false) {
     const params = new URLSearchParams();
     if (folderId !== null) params.set('folder_id', String(folderId));
     if (search) params.set('search', search);
+    if (recursive) params.set('recursive', 'true');
     const suffix = params.toString() ? `?${params}` : '';
     return request<Asset[]>(`/api/assets${suffix}`);
   },
   asset(id: number) {
     return request<Asset>(`/api/assets/${id}`);
   },
-  createShare(payload: { title?: string; asset_id?: number; folder_id?: number; expires_in_days?: number }) {
+  createShare(payload: { title?: string; asset_id?: number; folder_id?: number; asset_ids?: number[]; expires_in_days?: number }) {
     return request<ShareLink>('/api/shares', {
       method: 'POST',
       body: JSON.stringify(payload),

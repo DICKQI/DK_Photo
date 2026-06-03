@@ -24,6 +24,10 @@ class LibraryCreate(BaseModel):
     path: str = Field(min_length=1)
 
 
+class LibraryUpdate(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=1, max_length=120)
+
+
 class LibraryRead(BaseModel):
     id: int
     name: str
@@ -47,6 +51,10 @@ class FolderRead(BaseModel):
 
 class FolderDetail(FolderRead):
     ancestors: list[FolderRead] = []
+
+
+class FolderCoverUpdate(BaseModel):
+    cover_asset_id: int
 
 
 class AssetRead(BaseModel):
@@ -136,6 +144,7 @@ class ShareCreate(BaseModel):
     title: str = Field(default="", max_length=160)
     asset_id: Optional[int] = None
     folder_id: Optional[int] = None
+    asset_ids: Optional[list[int]] = None
     expires_in_days: Optional[int] = Field(default=7, ge=1, le=365)
 
 
@@ -145,6 +154,7 @@ class ShareRead(BaseModel):
     title: str
     asset_id: Optional[int]
     folder_id: Optional[int]
+    asset_ids: Optional[list[int]] = None
     expires_at: Optional[datetime]
     revoked_at: Optional[datetime]
     created_at: datetime
@@ -155,4 +165,5 @@ class PublicShareRead(BaseModel):
     title: str
     asset_id: Optional[int]
     folder_id: Optional[int]
+    asset_ids: Optional[list[int]] = None
     expires_at: Optional[datetime]

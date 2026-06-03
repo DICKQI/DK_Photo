@@ -5,7 +5,7 @@ from fastapi.responses import FileResponse
 from sqlmodel import select
 
 from app.deps import CurrentUser, SessionDep
-from app.models import Asset, LibraryRoot
+from app.models import Asset, Folder, LibraryRoot
 from app.schemas import AssetRead
 from app.services.paths import safe_asset_path
 from app.services.permissions import accessible_library_ids, require_asset_access
@@ -21,10 +21,22 @@ def list_assets(
     current_user: CurrentUser,
     folder_id: int | None = Query(default=None),
     search: str | None = Query(default=None),
+    recursive: bool = Query(default=False),
 ) -> list[Asset]:
     statement = select(Asset)
     if folder_id is not None:
-        statement = statement.where(Asset.folder_id == folder_id)
+        if recursive:
+            folder_ids = {folder_id}
+            pending = [folder_id]
+            while pending:
+                children = session.exec(
+                    select(Folder.id).where(Folder.parent_id.in_(pending))
+                ).all()
+                folder_ids.update(children)
+                pending = children
+            statement = statement.where(Asset.folder_id.in_(folder_ids))
+        else:
+            statement = statement.where(Asset.folder_id == folder_id)
     if search:
         statement = statement.where(Asset.filename.contains(search))
     allowed_library_ids = accessible_library_ids(session, current_user)

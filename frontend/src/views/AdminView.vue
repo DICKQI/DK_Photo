@@ -84,17 +84,45 @@
               <span class="row-icon">
                 <FolderSearch :size="17" />
               </span>
-              <div>
-                <strong>{{ library.name }}</strong>
+              <div class="library-row-body">
+                <input
+                  v-if="editingLibraryId === library.id"
+                  v-model="libraryEditBuffer[library.id]"
+                  class="library-name-input"
+                  :placeholder="t('admin.libraryName')"
+                  @keydown.enter.prevent="saveLibraryName(library)"
+                  @keydown.esc.prevent="cancelLibraryEdit"
+                />
+                <strong v-else>{{ library.name }}</strong>
                 <span>{{ library.path }}</span>
               </div>
             </div>
             <div class="row-actions">
               <small class="status-pill neutral">{{ library.last_scan_at ? formatDateTime(library.last_scan_at) : t('common.neverScanned') }}</small>
+              <template v-if="editingLibraryId === library.id">
+                <button class="secondary-button" :disabled="!isLibraryNameChanged(library) || isBusy(librarySaveKey(library.id))" @click="saveLibraryName(library)">
+                  <LoaderCircle v-if="isBusy(librarySaveKey(library.id))" class="spin" :size="17" />
+                  <Save v-else :size="17" />
+                  {{ isBusy(librarySaveKey(library.id)) ? t('common.saving') : t('common.save') }}
+                </button>
+                <button class="secondary-button" :disabled="isBusy(librarySaveKey(library.id))" @click="cancelLibraryEdit">
+                  <X :size="17" />
+                  {{ t('common.cancel') }}
+                </button>
+              </template>
+              <button v-else class="secondary-button" :title="t('admin.editLibraryName')" @click="editLibrary(library)">
+                <Pencil :size="17" />
+                {{ t('common.edit') }}
+              </button>
               <button class="secondary-button" :disabled="isBusy(scanKey(library.id))" @click="scan(library.id)">
                 <LoaderCircle v-if="isBusy(scanKey(library.id))" class="spin" :size="17" />
                 <ScanLine v-else :size="17" />
                 {{ isBusy(scanKey(library.id)) ? t('admin.queued') : t('admin.scan') }}
+              </button>
+              <button class="danger-button" :disabled="isBusy(libraryDeleteKey(library.id))" @click="openDeleteLibrary(library)">
+                <LoaderCircle v-if="isBusy(libraryDeleteKey(library.id))" class="spin" :size="17" />
+                <Trash2 v-else :size="17" />
+                {{ t('common.delete') }}
               </button>
             </div>
           </div>
@@ -289,6 +317,30 @@
       @select="selectDirectory"
     />
 
+    <div v-if="deleteLibraryTarget" class="modal-backdrop">
+      <section class="small-modal">
+        <header class="modal-header">
+          <h2>{{ t('admin.deleteLibrary') }}</h2>
+          <button class="icon-button" :disabled="isBusy(libraryDeleteKey(deleteLibraryTarget.id))" @click="closeDeleteLibrary">
+            <X :size="18" />
+          </button>
+        </header>
+        <div class="delete-library-summary">
+          <strong>{{ deleteLibraryTarget.name }}</strong>
+          <span>{{ deleteLibraryTarget.path }}</span>
+          <p>{{ t('admin.deleteLibraryWarning') }}</p>
+        </div>
+        <footer class="modal-actions">
+          <button class="secondary-button" :disabled="isBusy(libraryDeleteKey(deleteLibraryTarget.id))" @click="closeDeleteLibrary">{{ t('common.cancel') }}</button>
+          <button class="danger-button" :disabled="isBusy(libraryDeleteKey(deleteLibraryTarget.id))" @click="deleteLibrary">
+            <LoaderCircle v-if="isBusy(libraryDeleteKey(deleteLibraryTarget.id))" class="spin" :size="17" />
+            <Trash2 v-else :size="17" />
+            {{ isBusy(libraryDeleteKey(deleteLibraryTarget.id)) ? t('admin.deletingLibrary') : t('admin.confirmDeleteLibrary') }}
+          </button>
+        </footer>
+      </section>
+    </div>
+
     <div v-if="passwordUser" class="modal-backdrop">
       <section class="small-modal">
         <header class="modal-header">
@@ -376,6 +428,7 @@ import {
   KeyRound,
   LoaderCircle,
   Moon,
+  Pencil,
   Plus,
   RefreshCw,
   Save,
@@ -383,6 +436,7 @@ import {
   Search,
   ShieldCheck,
   Sun,
+  Trash2,
   UserCheck,
   UserPlus,
   UserX,
@@ -408,6 +462,7 @@ const messageKind = ref<'success' | 'error'>('success');
 const userSearch = ref('');
 const userStatusFilter = ref<'all' | 'active' | 'disabled'>('all');
 const userRoleFilter = ref<'all' | 'admin' | 'member'>('all');
+const editingLibraryId = ref<number | null>(null);
 const refreshKey = 'refresh';
 const createLibraryKey = 'library:create';
 const createUserKey = 'user:create';
@@ -415,8 +470,10 @@ const busyKeys = reactive<Record<string, boolean>>({});
 const showDirectoryPicker = ref(false);
 const passwordUser = ref<User | null>(null);
 const permissionUser = ref<User | null>(null);
+const deleteLibraryTarget = ref<Library | null>(null);
 const newPassword = ref('');
 const newUser = reactive({ email: '', displayName: '', password: '', role: 'member' });
+const libraryEditBuffer = reactive<Record<number, string>>({});
 const editBuffer = reactive<Record<number, { email: string; display_name: string; role: 'admin' | 'member' }>>({});
 const permissionBuffer = reactive<Record<number, { can_view: boolean; can_share: boolean }>>({});
 let messageTimer: ReturnType<typeof setTimeout> | null = null;
@@ -462,7 +519,16 @@ async function loadAdminData() {
   jobs.value = await api.jobs();
   users.value = await api.users();
   shares.value = await api.adminShares();
+  syncLibraryEditBuffer();
   syncEditBuffer();
+}
+
+function syncLibraryEditBuffer() {
+  const libraryIds = new Set(libraries.value.map((library) => library.id));
+  for (const library of libraries.value) libraryEditBuffer[library.id] = library.name;
+  for (const key of Object.keys(libraryEditBuffer)) {
+    if (!libraryIds.has(Number(key))) delete libraryEditBuffer[Number(key)];
+  }
 }
 
 function syncEditBuffer() {
@@ -489,6 +555,65 @@ async function createLibrary() {
     showMessage(errorMessage(err, t('admin.unableCreateLibrary')), 'error');
   } finally {
     stopBusy(createLibraryKey);
+  }
+}
+
+function editLibrary(library: Library) {
+  editingLibraryId.value = library.id;
+  libraryEditBuffer[library.id] = library.name;
+}
+
+function cancelLibraryEdit() {
+  if (editingLibraryId.value) {
+    const library = libraries.value.find((item) => item.id === editingLibraryId.value);
+    if (library) libraryEditBuffer[library.id] = library.name;
+  }
+  editingLibraryId.value = null;
+}
+
+async function saveLibraryName(library: Library) {
+  const key = librarySaveKey(library.id);
+  const name = libraryEditBuffer[library.id]?.trim() ?? '';
+  if (!name) {
+    showMessage(t('admin.libraryNameRequired'), 'error');
+    return;
+  }
+  if (!isLibraryNameChanged(library)) return;
+  startBusy(key);
+  try {
+    await api.updateLibrary(library.id, { name });
+    editingLibraryId.value = null;
+    await reloadAfterMutation(t('admin.libraryUpdated'));
+  } catch (err) {
+    showMessage(errorMessage(err, t('admin.unableUpdateLibrary')), 'error');
+  } finally {
+    stopBusy(key);
+  }
+}
+
+function openDeleteLibrary(library: Library) {
+  deleteLibraryTarget.value = library;
+}
+
+function closeDeleteLibrary() {
+  if (deleteLibraryTarget.value && isBusy(libraryDeleteKey(deleteLibraryTarget.value.id))) return;
+  deleteLibraryTarget.value = null;
+}
+
+async function deleteLibrary() {
+  const library = deleteLibraryTarget.value;
+  if (!library) return;
+  const key = libraryDeleteKey(library.id);
+  startBusy(key);
+  try {
+    await api.deleteLibrary(library.id);
+    deleteLibraryTarget.value = null;
+    if (editingLibraryId.value === library.id) editingLibraryId.value = null;
+    await reloadAfterMutation(t('admin.libraryDeleted'));
+  } catch (err) {
+    showMessage(errorMessage(err, t('admin.unableDeleteLibrary')), 'error');
+  } finally {
+    stopBusy(key);
   }
 }
 
@@ -665,6 +790,11 @@ function isUserChanged(user: User) {
   return draft.display_name.trim() !== user.display_name || draft.email.trim() !== user.email || draft.role !== user.role;
 }
 
+function isLibraryNameChanged(library: Library) {
+  const draft = libraryEditBuffer[library.id];
+  return Boolean(draft?.trim()) && draft.trim() !== library.name;
+}
+
 function userInitials(user: User) {
   const source = user.display_name.trim() || user.email.trim();
   const parts = source.split(/\s+/).filter(Boolean);
@@ -686,6 +816,14 @@ function stopBusy(key: string) {
 
 function scanKey(id: number) {
   return `library:scan:${id}`;
+}
+
+function librarySaveKey(id: number) {
+  return `library:save:${id}`;
+}
+
+function libraryDeleteKey(id: number) {
+  return `library:delete:${id}`;
 }
 
 function userSaveKey(id: number) {
