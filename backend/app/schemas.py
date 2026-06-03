@@ -110,6 +110,10 @@ class FilesystemEntry(BaseModel):
     is_root: bool = False
     is_accessible: bool = True
     error: Optional[str] = None
+    kind: str = "folder"
+    group: Optional[str] = None
+    child_folder_count: int = 0
+    image_count: int = 0
 
 
 class FilesystemRoots(BaseModel):
@@ -124,6 +128,8 @@ class FilesystemChildren(BaseModel):
     path: str
     parent_path: Optional[str]
     entries: list[FilesystemEntry]
+    child_folder_count: int = 0
+    image_count: int = 0
 
 
 class ShareCreate(BaseModel):

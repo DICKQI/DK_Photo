@@ -85,6 +85,10 @@ export interface FilesystemEntry {
   is_root: boolean;
   is_accessible: boolean;
   error: string | null;
+  kind: 'folder' | 'favorite' | 'drive' | 'error';
+  group: string | null;
+  child_folder_count: number;
+  image_count: number;
 }
 
 export interface FilesystemRoots {
@@ -99,4 +103,6 @@ export interface FilesystemChildren {
   path: string;
   parent_path: string | null;
   entries: FilesystemEntry[];
+  child_folder_count: number;
+  image_count: number;
 }
