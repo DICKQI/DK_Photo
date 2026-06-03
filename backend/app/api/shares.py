@@ -9,7 +9,7 @@ from sqlmodel import select
 
 from app.deps import CurrentUser, SessionDep
 from app.models import Asset, Folder, LibraryRoot, ShareAsset, ShareLink
-from app.schemas import AssetRead, PublicShareRead, ShareCreate, ShareRead
+from app.schemas import AssetRead, PublicShareRead, ShareCreate, ShareRead, ShareUpdate
 from app.services.paths import safe_asset_path
 from app.services.permissions import require_asset_access, require_folder_access
 from app.services.thumbnails import ensure_thumbnail
@@ -66,6 +66,53 @@ def create_share(payload: ShareCreate, session: SessionDep, current_user: Curren
             session.add(ShareAsset(share_id=share.id, asset_id=aid))
         session.commit()
     return share
+
+
+@router.get("/api/shares", response_model=list[ShareRead])
+def list_my_shares(session: SessionDep, current_user: CurrentUser) -> list[ShareLink]:
+    shares = session.exec(
+        select(ShareLink)
+        .where(ShareLink.creator_id == current_user.id, ShareLink.revoked_at == None)
+        .order_by(ShareLink.created_at.desc())
+    ).all()
+    return shares
+
+
+@router.patch("/api/shares/{share_id}", response_model=ShareRead)
+def update_share(share_id: int, payload: ShareUpdate, session: SessionDep, current_user: CurrentUser) -> ShareLink:
+    share = session.get(ShareLink, share_id)
+    if not share:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Share not found")
+    if share.creator_id != (current_user.id or 0):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not your share link")
+    if share.revoked_at:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Share is already revoked")
+    if payload.title is not None:
+        share.title = payload.title
+    if payload.expires_in_days is not None:
+        if payload.expires_in_days > 0:
+            share.expires_at = datetime.utcnow() + timedelta(days=payload.expires_in_days)
+        else:
+            share.expires_at = None
+    session.add(share)
+    session.commit()
+    session.refresh(share)
+    return share
+
+
+@router.delete("/api/shares/{share_id}")
+def delete_share(share_id: int, session: SessionDep, current_user: CurrentUser) -> dict:
+    share = session.get(ShareLink, share_id)
+    if not share:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Share not found")
+    if share.creator_id != (current_user.id or 0):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not your share link")
+    if share.revoked_at:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Share is already revoked")
+    share.revoked_at = datetime.utcnow()
+    session.add(share)
+    session.commit()
+    return {"ok": True}
 
 
 def get_active_share(session: SessionDep, token: str) -> ShareLink:

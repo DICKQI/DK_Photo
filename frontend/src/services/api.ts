@@ -149,6 +149,18 @@ export const api = {
       body: JSON.stringify(payload),
     });
   },
+  myShares() {
+    return request<ShareLink[]>('/api/shares');
+  },
+  deleteShare(id: number) {
+    return request<{ ok: boolean }>(`/api/shares/${id}`, { method: 'DELETE' });
+  },
+  updateShare(id: number, payload: { title?: string; expires_in_days?: number }) {
+    return request<ShareLink>(`/api/shares/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    });
+  },
   publicShare(token: string) {
     return request<PublicShare>(`/api/public/shares/${token}`);
   },

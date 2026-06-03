@@ -40,6 +40,40 @@
           <span>{{ t('album.noMatchingLibraries') }}</span>
         </div>
       </div>
+      <button class="sidebar-action" :class="{ active: showSharesPanel }" @click="toggleSharesPanel">
+        <Share2 :size="18" />
+        {{ t('album.myShareLinks') }}
+      </button>
+      <div v-if="showSharesPanel" class="shares-panel">
+        <div v-if="sharesLoading" class="shares-loading">
+          <LoaderCircle class="spin" :size="18" />
+          <span>{{ t('album.loadingPhotos') }}</span>
+        </div>
+        <div v-else-if="!myShares.length" class="shares-empty">
+          <span>{{ t('album.noShareLinks') }}</span>
+          <small>{{ t('album.noShareLinksHint') }}</small>
+        </div>
+        <div v-else class="shares-list">
+          <div v-for="share in myShares" :key="share.id" class="share-item">
+            <div class="share-item-info">
+              <span class="share-item-title">{{ share.title }}</span>
+              <span v-if="share.expires_at" class="share-item-meta">{{ t('album.shareExpires', { date: formatDate(share.expires_at) }) }}</span>
+              <span v-else class="share-item-meta">{{ t('album.shareNeverExpires') }}</span>
+            </div>
+            <div class="share-item-actions">
+              <button class="share-item-btn" :title="t('album.shareCopyLink')" @click="copyMyShareLink(share)">
+                <Link2 :size="15" />
+              </button>
+              <button class="share-item-btn" :title="t('common.edit')" @click="openEditShare(share)">
+                <Pencil :size="15" />
+              </button>
+              <button class="share-item-btn" :title="t('common.delete')" @click="openDeleteShare(share)">
+                <Trash2 :size="15" />
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
       <RouterLink v-if="user?.role === 'admin'" class="admin-link" to="/admin">
         <Settings :size="18" />
         {{ t('common.management') }}
@@ -397,6 +431,98 @@
         </div>
       </div>
     </Teleport>
+
+    <Teleport to="body">
+      <div v-if="shareCreateTarget" class="modal-backdrop" @click="closeShareCreate">
+        <div class="rename-modal" @click.stop>
+          <div class="modal-header">
+            <strong>{{ t('album.createShareLink') }}</strong>
+            <button class="icon-button" :title="t('common.close')" @click="closeShareCreate">
+              <X :size="18" />
+            </button>
+          </div>
+          <div class="rename-body">
+            <label class="rename-label">{{ t('album.shareTitleLabel') }}</label>
+            <input
+              v-model="shareCreateTitle"
+              type="text"
+              class="rename-input"
+              maxlength="160"
+              @keydown.escape="closeShareCreate"
+            />
+            <label class="rename-label" style="margin-top: 0.75rem">{{ t('album.shareExpiryLabel') }}</label>
+            <select v-model="shareCreateExpiry" class="rename-input">
+              <option :value="1">{{ t('album.shareExpiry1Day') }}</option>
+              <option :value="7">{{ t('album.shareExpiry7Days') }}</option>
+              <option :value="30">{{ t('album.shareExpiry30Days') }}</option>
+              <option :value="90">{{ t('album.shareExpiry90Days') }}</option>
+              <option :value="365">{{ t('album.shareExpiry365Days') }}</option>
+              <option :value="0">{{ t('album.shareExpiryNever') }}</option>
+            </select>
+          </div>
+          <div class="rename-footer">
+            <button class="secondary-button" @click="closeShareCreate">{{ t('common.cancel') }}</button>
+            <button class="primary-button" @click="confirmCreateShare">{{ t('album.createShareLink') }}</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <Teleport to="body">
+      <div v-if="editShareTarget" class="modal-backdrop" @click="closeEditShare">
+        <div class="rename-modal" @click.stop>
+          <div class="modal-header">
+            <strong>{{ t('album.editShareLink') }}</strong>
+            <button class="icon-button" :title="t('common.close')" @click="closeEditShare">
+              <X :size="18" />
+            </button>
+          </div>
+          <div class="rename-body">
+            <label class="rename-label">{{ t('album.shareTitleLabel') }}</label>
+            <input
+              v-model="editShareTitle"
+              type="text"
+              class="rename-input"
+              maxlength="160"
+              @keydown.escape="closeEditShare"
+            />
+            <label class="rename-label" style="margin-top: 0.75rem">{{ t('album.shareExpiryLabel') }}</label>
+            <select v-model="editShareExpiry" class="rename-input">
+              <option :value="1">{{ t('album.shareExpiry1Day') }}</option>
+              <option :value="7">{{ t('album.shareExpiry7Days') }}</option>
+              <option :value="30">{{ t('album.shareExpiry30Days') }}</option>
+              <option :value="90">{{ t('album.shareExpiry90Days') }}</option>
+              <option :value="365">{{ t('album.shareExpiry365Days') }}</option>
+              <option :value="0">{{ t('album.shareExpiryNever') }}</option>
+            </select>
+          </div>
+          <div class="rename-footer">
+            <button class="secondary-button" @click="closeEditShare">{{ t('common.cancel') }}</button>
+            <button class="primary-button" @click="confirmEditShare">{{ t('common.save') }}</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <Teleport to="body">
+      <div v-if="deleteShareTarget" class="modal-backdrop" @click="closeDeleteShare">
+        <div class="rename-modal" @click.stop>
+          <div class="modal-header">
+            <strong>{{ t('common.delete') }}</strong>
+            <button class="icon-button" :title="t('common.close')" @click="closeDeleteShare">
+              <X :size="18" />
+            </button>
+          </div>
+          <div class="rename-body">
+            <p>{{ t('album.confirmDeleteShare') }}</p>
+          </div>
+          <div class="rename-footer">
+            <button class="secondary-button" @click="closeDeleteShare">{{ t('common.cancel') }}</button>
+            <button class="primary-button danger-button" @click="confirmDeleteShare">{{ t('common.delete') }}</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </main>
 </template>
 
@@ -416,6 +542,7 @@ import {
   ImageOff,
   Images,
   LayoutGrid,
+  Link2,
   ListChecks,
   LoaderCircle,
   LogOut,
@@ -428,6 +555,7 @@ import {
   Settings,
   Share2,
   Sun,
+  Trash2,
   X,
 } from 'lucide-vue-next';
 import LanguageToggle from '../components/LanguageToggle.vue';
@@ -435,7 +563,7 @@ import PhotoViewer from '../components/PhotoViewer.vue';
 import { useLocale } from '../composables/useLocale';
 import { useTheme } from '../composables/useTheme';
 import { api, thumbnailUrl } from '../services/api';
-import type { Asset, Folder as FolderType, User } from '../types';
+import type { Asset, Folder as FolderType, ShareLink, User } from '../types';
 
 type ThumbSize = 'small' | 'medium' | 'large';
 type SortMode = 'date' | 'name' | 'size';
@@ -474,6 +602,16 @@ const renameName = ref('');
 const renameInputRef = ref<HTMLInputElement | null>(null);
 const selectionMode = ref(false);
 const selectedAssetIds = ref(new Set<number>());
+const showSharesPanel = ref(false);
+const myShares = ref<ShareLink[]>([]);
+const sharesLoading = ref(false);
+const shareCreateTarget = ref<{ asset_id?: number; folder_id?: number; asset_ids?: number[] } | null>(null);
+const shareCreateTitle = ref('');
+const shareCreateExpiry = ref(7);
+const editShareTarget = ref<ShareLink | null>(null);
+const editShareTitle = ref('');
+const editShareExpiry = ref(7);
+const deleteShareTarget = ref<ShareLink | null>(null);
 
 const tileSize = computed(() => {
   if (thumbSize.value === 'small') return '150px';
@@ -638,14 +776,10 @@ function openViewer(index: number) {
   viewerIndex.value = index;
 }
 
-async function shareAsset(asset: Asset) {
-  try {
-    const share = await api.createShare({ asset_id: asset.id, title: asset.filename, expires_in_days: 7 });
-    await navigator.clipboard?.writeText(`${location.origin}/share/${share.token}`);
-    showToast(t('album.shareCopied'));
-  } catch (err) {
-    showToast(err instanceof Error ? err.message : t('album.unableCreateShare'));
-  }
+function shareAsset(asset: Asset) {
+  shareCreateTarget.value = { asset_id: asset.id };
+  shareCreateTitle.value = asset.filename;
+  shareCreateExpiry.value = 7;
 }
 
 function openContextMenu(event: MouseEvent, folder: FolderType) {
@@ -744,16 +878,121 @@ function clearSelection() {
   selectedAssetIds.value = new Set();
 }
 
-async function shareSelectedAssets() {
+function shareSelectedAssets() {
   const ids = Array.from(selectedAssetIds.value);
   if (!ids.length) return;
+  shareCreateTarget.value = { asset_ids: ids };
+  shareCreateTitle.value = '';
+  shareCreateExpiry.value = 7;
+}
+
+function closeShareCreate() {
+  shareCreateTarget.value = null;
+  shareCreateTitle.value = '';
+  shareCreateExpiry.value = 7;
+}
+
+async function confirmCreateShare() {
+  const target = shareCreateTarget.value;
+  if (!target) return;
   try {
-    const share = await api.createShare({ asset_ids: ids, title: '', expires_in_days: 7 });
+    const payload: Record<string, unknown> = { title: shareCreateTitle.value };
+    if (target.asset_id) payload.asset_id = target.asset_id;
+    if (target.folder_id) payload.folder_id = target.folder_id;
+    if (target.asset_ids) payload.asset_ids = target.asset_ids;
+    if (shareCreateExpiry.value > 0) {
+      payload.expires_in_days = shareCreateExpiry.value;
+    } else {
+      payload.expires_in_days = 0;
+    }
+    const share = await api.createShare(payload as { title?: string; asset_id?: number; asset_ids?: number[]; expires_in_days?: number });
     await navigator.clipboard?.writeText(`${location.origin}/share/${share.token}`);
     showToast(t('album.shareCopied'));
-    toggleSelectionMode();
+    closeShareCreate();
+    if (selectionMode.value) toggleSelectionMode();
+    if (showSharesPanel.value) await loadMyShares();
   } catch (err) {
-    showToast(err instanceof Error ? err.message : t('album.unableCreateMultiShare'));
+    showToast(err instanceof Error ? err.message : t('album.unableCreateShare'));
+  }
+}
+
+async function toggleSharesPanel() {
+  showSharesPanel.value = !showSharesPanel.value;
+  if (showSharesPanel.value) await loadMyShares();
+}
+
+async function loadMyShares() {
+  sharesLoading.value = true;
+  try {
+    myShares.value = await api.myShares();
+  } catch (err) {
+    showToast(err instanceof Error ? err.message : t('album.unableLoadShares'));
+  } finally {
+    sharesLoading.value = false;
+  }
+}
+
+async function copyMyShareLink(share: ShareLink) {
+  try {
+    await navigator.clipboard?.writeText(`${location.origin}/share/${share.token}`);
+    showToast(t('admin.shareCopied'));
+  } catch {
+    showToast(t('admin.unableCopyShare'));
+  }
+}
+
+function openEditShare(share: ShareLink) {
+  editShareTarget.value = share;
+  editShareTitle.value = share.title;
+  if (share.expires_at) {
+    const diff = Math.ceil((new Date(share.expires_at).getTime() - Date.now()) / 86400000);
+    editShareExpiry.value = diff > 0 ? diff : 1;
+  } else {
+    editShareExpiry.value = 0;
+  }
+}
+
+function closeEditShare() {
+  editShareTarget.value = null;
+  editShareTitle.value = '';
+  editShareExpiry.value = 7;
+}
+
+async function confirmEditShare() {
+  const share = editShareTarget.value;
+  if (!share) return;
+  try {
+    const payload: { title?: string; expires_in_days?: number } = {};
+    if (editShareTitle.value !== share.title) payload.title = editShareTitle.value;
+    payload.expires_in_days = editShareExpiry.value;
+    const updated = await api.updateShare(share.id, payload);
+    const idx = myShares.value.findIndex((s) => s.id === share.id);
+    if (idx !== -1) myShares.value[idx] = updated;
+    showToast(t('album.shareUpdated'));
+    closeEditShare();
+  } catch (err) {
+    showToast(err instanceof Error ? err.message : t('album.unableUpdateShare'));
+  }
+}
+
+function openDeleteShare(share: ShareLink) {
+  deleteShareTarget.value = share;
+}
+
+function closeDeleteShare() {
+  deleteShareTarget.value = null;
+}
+
+async function confirmDeleteShare() {
+  const share = deleteShareTarget.value;
+  if (!share) return;
+  try {
+    await api.deleteShare(share.id);
+    myShares.value = myShares.value.filter((s) => s.id !== share.id);
+    showToast(t('album.shareDeleted'));
+    closeDeleteShare();
+  } catch (err) {
+    showToast(err instanceof Error ? err.message : t('album.unableDeleteShare'));
   }
 }
 

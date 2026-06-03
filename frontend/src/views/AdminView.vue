@@ -74,7 +74,7 @@
           </button>
         </form>
         <div v-if="!libraries.length" class="panel-empty">
-          <FolderSearch :size="24" />
+          <GalleryHorizontal :size="24" />
           <strong>{{ t('admin.noLibrariesYet') }}</strong>
           <span>{{ t('admin.noLibrariesHint') }}</span>
         </div>
@@ -82,7 +82,7 @@
           <div v-for="library in libraries" :key="library.id" class="table-row library-row">
             <div class="row-title">
               <span class="row-icon">
-                <FolderSearch :size="17" />
+                <GalleryHorizontal :size="20" />
               </span>
               <div class="library-row-body">
                 <input
@@ -247,6 +247,7 @@
         </div>
       </article>
 
+      <div class="admin-grid-row">
       <article class="admin-panel">
         <header>
           <h2>{{ t('admin.scanJobs') }}</h2>
@@ -256,14 +257,14 @@
           <strong>{{ t('admin.noScanJobs') }}</strong>
           <span>{{ t('admin.noScanJobsHint') }}</span>
         </div>
-        <div v-else class="table-list">
+        <div v-else class="table-list scrollable">
           <div v-for="job in jobs" :key="job.id" class="table-row">
             <div class="row-title">
               <span class="row-icon" :class="jobStatusClass(job.status)">
-                <LoaderCircle v-if="job.status === 'running' || job.status === 'queued'" class="spin" :size="17" />
-                <CircleCheck v-else-if="job.status === 'finished'" :size="17" />
-                <CircleAlert v-else-if="job.status === 'failed'" :size="17" />
-                <ScanLine v-else :size="17" />
+                <LoaderCircle v-if="job.status === 'running' || job.status === 'queued'" class="spin" :size="20" />
+                <Radar v-else-if="job.status === 'finished'" :size="20" />
+                <CircleAlert v-else-if="job.status === 'failed'" :size="20" />
+                <Radar v-else :size="20" />
               </span>
               <div>
                 <strong>#{{ job.id }} - {{ job.library_id ? libraryNameById(job.library_id) : t('admin.summaryLibraries') }}</strong>
@@ -288,11 +289,11 @@
           <strong>{{ t('admin.noShares') }}</strong>
           <span>{{ t('admin.noSharesHint') }}</span>
         </div>
-        <div v-else class="table-list">
-          <div v-for="share in shares" :key="share.id" class="table-row">
-            <div class="row-title">
-              <span class="row-icon">
-                <ShieldCheck :size="17" />
+        <div v-else class="table-list scrollable">
+          <div v-for="share in shares" :key="share.id" class="table-row compact">
+            <div class="row-title compact-title">
+              <span class="row-icon compact-icon">
+                <ShieldCheck :size="16" />
               </span>
               <div>
                 <strong>{{ share.title }}</strong>
@@ -301,14 +302,15 @@
             </div>
             <div class="row-actions">
               <small class="status-pill neutral">{{ share.expires_at ? formatDate(share.expires_at) : t('common.never') }}</small>
-              <button class="secondary-button" @click="copyShareLink(share)">
-                <Copy :size="16" />
+              <button class="secondary-button compact-btn" @click="copyShareLink(share)">
+                <Copy :size="14" />
                 {{ t('common.copy') }}
               </button>
             </div>
           </div>
         </div>
       </article>
+      </div>
     </section>
 
     <DirectoryPicker
@@ -424,12 +426,14 @@ import {
   CircleCheck,
   Copy,
   FolderSearch,
+  GalleryHorizontal,
   Images,
   KeyRound,
   LoaderCircle,
   Moon,
   Pencil,
   Plus,
+  Radar,
   RefreshCw,
   Save,
   ScanLine,

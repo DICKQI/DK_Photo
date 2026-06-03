@@ -149,7 +149,7 @@ class ShareCreate(BaseModel):
     asset_id: Optional[int] = None
     folder_id: Optional[int] = None
     asset_ids: Optional[list[int]] = None
-    expires_in_days: Optional[int] = Field(default=7, ge=1, le=365)
+    expires_in_days: Optional[int] = Field(default=7, ge=0, le=365)
 
 
 class ShareRead(BaseModel):
@@ -162,6 +162,11 @@ class ShareRead(BaseModel):
     expires_at: Optional[datetime]
     revoked_at: Optional[datetime]
     created_at: datetime
+
+
+class ShareUpdate(BaseModel):
+    title: Optional[str] = Field(default=None, max_length=160)
+    expires_in_days: Optional[int] = Field(default=None, ge=0, le=365)
 
 
 class PublicShareRead(BaseModel):
