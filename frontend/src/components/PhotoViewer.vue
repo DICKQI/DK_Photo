@@ -193,7 +193,14 @@ watch(
 );
 
 watch(showInfo, () => {
-  nextTick(updateStageSize);
+  nextTick(() => {
+    updateStageSize();
+    centerStageScroll();
+  });
+});
+
+watch(zoom, () => {
+  nextTick(centerStageScroll);
 });
 
 onMounted(() => {
@@ -273,6 +280,7 @@ function handleImageLoad(event: Event) {
   };
   imageLoading.value = false;
   imageError.value = '';
+  nextTick(centerStageScroll);
 }
 
 function handleImageError() {
@@ -317,6 +325,15 @@ function updateStageSize() {
     width: Math.max(1, stage.clientWidth - horizontalPadding),
     height: Math.max(1, stage.clientHeight - verticalPadding),
   };
+}
+
+function centerStageScroll() {
+  const stage = stageRef.value;
+  if (!stage) return;
+  stage.scrollTo({
+    left: Math.max(0, (stage.scrollWidth - stage.clientWidth) / 2),
+    top: Math.max(0, (stage.scrollHeight - stage.clientHeight) / 2),
+  });
 }
 
 function parseCssPixels(value: string) {

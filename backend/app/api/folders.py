@@ -5,7 +5,7 @@ from sqlmodel import select
 
 from app.deps import CurrentUser, SessionDep
 from app.models import Asset, Folder
-from app.schemas import FolderCoverUpdate, FolderDetail, FolderRead
+from app.schemas import FolderCoverUpdate, FolderDetail, FolderRead, FolderRenameUpdate
 from app.services.permissions import accessible_library_ids, require_folder_access
 
 
@@ -62,6 +62,22 @@ def update_folder_cover(folder_id: int, payload: FolderCoverUpdate, session: Ses
     if asset.folder_id != folder.id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Asset does not belong to this folder")
     folder.cover_asset_id = asset.id
+    session.add(folder)
+    session.commit()
+    session.refresh(folder)
+    return folder
+
+
+@router.patch("/{folder_id}/rename", response_model=FolderRead)
+def rename_folder(folder_id: int, payload: FolderRenameUpdate, session: SessionDep, current_user: CurrentUser) -> Folder:
+    folder = session.get(Folder, folder_id)
+    if not folder:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Folder not found")
+    require_folder_access(session, current_user, folder)
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Folder name is required")
+    folder.name = name
     session.add(folder)
     session.commit()
     session.refresh(folder)

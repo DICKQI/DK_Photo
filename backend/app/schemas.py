@@ -57,6 +57,10 @@ class FolderCoverUpdate(BaseModel):
     cover_asset_id: int
 
 
+class FolderRenameUpdate(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+
+
 class AssetRead(BaseModel):
     id: int
     library_id: int

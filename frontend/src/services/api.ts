@@ -126,6 +126,12 @@ export const api = {
       body: JSON.stringify({ cover_asset_id: coverAssetId }),
     });
   },
+  renameFolder(folderId: number, name: string) {
+    return request<Folder>(`/api/folders/${folderId}/rename`, {
+      method: 'PATCH',
+      body: JSON.stringify({ name }),
+    });
+  },
   assets(folderId: number | null, search = '', recursive = false) {
     const params = new URLSearchParams();
     if (folderId !== null) params.set('folder_id', String(folderId));

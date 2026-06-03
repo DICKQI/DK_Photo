@@ -3127,15 +3127,19 @@ select:focus {
 
 .viewer-zoom-readout {
   display: grid;
-  min-width: 52px;
+  width: 54px;
+  min-width: 54px;
   height: 42px;
   place-items: center;
   border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.07);
   color: #d7deec;
-  font-size: 0.82rem;
+  font-size: 0.78rem;
   font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  white-space: nowrap;
 }
 
 @media (max-width: 900px) {
@@ -3164,7 +3168,8 @@ select:focus {
   }
 
   .viewer-zoom-readout {
-    min-width: 48px;
+    width: 52px;
+    min-width: 52px;
     height: 40px;
   }
 
@@ -3369,6 +3374,69 @@ select:focus {
 :root[data-theme="dark"] .cover-picker-item.selected {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px rgba(122, 167, 255, 0.28);
+}
+
+.rename-modal {
+  display: grid;
+  gap: 14px;
+  grid-template-rows: auto 1fr auto;
+  width: min(420px, 100%);
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 24px 90px rgba(15, 23, 42, 0.28);
+  padding: 18px;
+}
+
+.rename-modal .modal-header {
+  padding: 0;
+}
+
+.rename-body {
+  display: grid;
+  gap: 6px;
+}
+
+.rename-label {
+  font-size: 0.85rem;
+  font-weight: 650;
+  color: var(--muted);
+}
+
+.rename-input {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-subtle);
+  color: var(--text);
+  padding: 10px 12px;
+  font-size: 0.95rem;
+  font-family: inherit;
+  outline: none;
+}
+
+.rename-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(45, 108, 223, 0.15);
+}
+
+.rename-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+:root[data-theme="dark"] .rename-modal {
+  background: #151d2d;
+}
+
+:root[data-theme="dark"] .rename-input {
+  background: #101827;
+  border-color: var(--border);
+}
+
+:root[data-theme="dark"] .rename-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(122, 167, 255, 0.16);
 }
 
 .photo-tile.selected {

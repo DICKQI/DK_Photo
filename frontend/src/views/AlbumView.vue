@@ -318,6 +318,12 @@
             {{ t('album.changeCover') }}
           </button>
         </li>
+        <li>
+          <button @click="openRenameModal(contextMenuFolder!)">
+            <Pencil :size="16" />
+            {{ t('album.renameFolder') }}
+          </button>
+        </li>
       </ul>
     </Teleport>
 
@@ -358,11 +364,44 @@
         </div>
       </div>
     </Teleport>
+
+    <Teleport to="body">
+      <div v-if="renameFolder" class="modal-backdrop" @click="closeRenameModal">
+        <div class="rename-modal" @click.stop>
+          <div class="modal-header">
+            <strong>{{ t('album.renameFolderTitle') }}</strong>
+            <button class="icon-button" :title="t('common.close')" @click="closeRenameModal">
+              <X :size="18" />
+            </button>
+          </div>
+          <div class="rename-body">
+            <label class="rename-label" for="rename-input">{{ t('album.folderName') }}</label>
+            <input
+              id="rename-input"
+              ref="renameInputRef"
+              v-model="renameName"
+              type="text"
+              class="rename-input"
+              :placeholder="renameFolder.name"
+              maxlength="120"
+              @keydown.enter="confirmRename"
+              @keydown.escape="closeRenameModal"
+            />
+          </div>
+          <div class="rename-footer">
+            <button class="secondary-button" @click="closeRenameModal">{{ t('common.cancel') }}</button>
+            <button class="primary-button" :disabled="!renameName.trim()" @click="confirmRename">
+              {{ t('album.rename') }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </main>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import {
   ArrowDownAZ,
@@ -383,6 +422,7 @@ import {
   Maximize2,
   Moon,
   PanelLeft,
+  Pencil,
   RefreshCw,
   Search,
   Settings,
@@ -429,6 +469,9 @@ const contextMenuPos = ref({ x: 0, y: 0 });
 const coverPickerFolder = ref<FolderType | null>(null);
 const coverPickerAssets = ref<Asset[]>([]);
 const coverPickerLoading = ref(false);
+const renameFolder = ref<FolderType | null>(null);
+const renameName = ref('');
+const renameInputRef = ref<HTMLInputElement | null>(null);
 const selectionMode = ref(false);
 const selectedAssetIds = ref(new Set<number>());
 
@@ -646,6 +689,38 @@ async function selectCover(assetId: number) {
 
 function closeCoverPicker() {
   coverPickerFolder.value = null;
+}
+
+function openRenameModal(folder: FolderType) {
+  closeContextMenu();
+  renameFolder.value = folder;
+  renameName.value = folder.name;
+  nextTick(() => {
+    renameInputRef.value?.focus();
+    renameInputRef.value?.select();
+  });
+}
+
+function closeRenameModal() {
+  renameFolder.value = null;
+  renameName.value = '';
+}
+
+async function confirmRename() {
+  const name = renameName.value.trim();
+  if (!name || !renameFolder.value) return;
+  const folder = renameFolder.value;
+  try {
+    const updated = await api.renameFolder(folder.id, name);
+    folder.name = updated.name;
+    const idx = childFolders.value.findIndex((f) => f.id === folder.id);
+    if (idx !== -1) childFolders.value[idx] = updated;
+    showToast(t('album.folderRenamed'));
+    renameFolder.value = null;
+    renameName.value = '';
+  } catch (err) {
+    showToast(err instanceof Error ? err.message : t('album.unableRenameFolder'));
+  }
 }
 
 function toggleSelectionMode() {
