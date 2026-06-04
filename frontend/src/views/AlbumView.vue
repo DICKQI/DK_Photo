@@ -1570,13 +1570,13 @@
 
     <Teleport to="body">
       <div
-        v-if="contextMenuFolder"
+        v-if="contextMenuFolder && isAdmin"
         class="context-menu-backdrop"
         @click="closeContextMenu"
         @contextmenu.prevent="closeContextMenu"
       />
       <ul
-        v-if="contextMenuFolder"
+        v-if="contextMenuFolder && isAdmin"
         class="context-menu"
         :style="{ left: contextMenuPos.x + 'px', top: contextMenuPos.y + 'px' }"
       >
@@ -1850,6 +1850,7 @@ const router = useRouter();
 const { isDark, toggleTheme } = useTheme();
 const { t, formatCount, formatDate } = useLocale();
 const user = ref<User | null>(null);
+const isAdmin = computed(() => user.value?.role === 'admin');
 const rootFolders = ref<FolderType[]>([]);
 const childFolders = ref<FolderType[]>([]);
 const currentFolder = ref<FolderType | null>(null);
@@ -3113,6 +3114,7 @@ async function openLensView(lens: AssetLens) {
 }
 
 function openContextMenu(event: MouseEvent, folder: FolderType) {
+  if (!isAdmin.value) return;
   contextMenuFolder.value = folder;
   contextMenuPos.value = { x: event.clientX, y: event.clientY };
 }

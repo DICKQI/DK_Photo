@@ -142,7 +142,7 @@
 
 ### PATCH /api/folders/{folder_id}/cover
 
-更改文件夹封面。需要认证。
+更改文件夹封面。需要管理员角色。
 
 **请求体**
 ```json
@@ -163,7 +163,7 @@
 
 ### PATCH /api/folders/{folder_id}/rename
 
-重命名文件夹。需要认证。
+重命名文件夹。需要管理员角色。
 
 **请求体**
 ```json
@@ -1053,6 +1053,23 @@ GET /api/assets?folder_id=1&recursive=true&sort=recent&media_type=image&min_rati
 列出所有分享链接（包括已撤销的）。需要管理员角色。
 
 **响应** `200` — 数组，参见 [ShareRead](#shareread)（按创建时间倒序）
+
+#### PATCH /api/admin/shares/{share_id}
+
+更新任意分享链接的标题、过期时间或密码。需要管理员角色。
+
+**请求体** — 参见 `PATCH /api/shares/{share_id}`。
+
+**响应** `200` — 参见 [ShareRead](#shareread)
+
+#### DELETE /api/admin/shares/{share_id}
+
+撤销任意分享链接。需要管理员角色。
+
+**响应** `200`
+```json
+{ "ok": true }
+```
 
 ---
 

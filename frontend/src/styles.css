@@ -2749,7 +2749,10 @@ select:focus {
 }
 
 .users-panel {
-  align-content: start;
+  display: flex;
+  flex-direction: column;
+  max-height: min(720px, calc(100vh - 200px));
+  overflow: hidden;
 }
 
 .monitor-panel {
@@ -2856,7 +2859,7 @@ select:focus {
 }
 
 .row-title strong,
-.row-title span {
+.row-title > div span {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2889,6 +2892,7 @@ select:focus {
 .row-icon svg {
   display: block;
   flex-shrink: 0;
+  overflow: visible;
 }
 
 .compact-icon {
@@ -2935,7 +2939,8 @@ select:focus {
 }
 
 .users-panel .user-table {
-  max-height: min(640px, calc(100vh - 260px));
+  flex: 1;
+  min-height: 0;
   overflow-x: hidden;
   overflow-y: auto;
   padding-right: 4px;
@@ -4189,6 +4194,7 @@ select:focus {
 
   .users-panel .user-table {
     max-height: none;
+    flex: none;
     overflow: visible;
     padding-right: 0;
   }

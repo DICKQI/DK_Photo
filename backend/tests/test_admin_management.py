@@ -164,6 +164,214 @@ def test_member_cannot_update_or_delete_libraries(tmp_path: Path) -> None:
     app.dependency_overrides.clear()
 
 
+def test_deleted_user_token_cannot_authenticate_recreated_user(tmp_path: Path) -> None:
+    client, _ = isolated_client(tmp_path)
+    old_member_client = TestClient(app)
+    old_email = f"old-token-{tmp_path.name}@example.com"
+    new_email = f"new-token-{tmp_path.name}@example.com"
+
+    with client, old_member_client:
+        login(client, "admin@example.com", "change-me-now")
+        created = client.post(
+            "/api/admin/users",
+            json={
+                "email": old_email,
+                "display_name": "Old Member",
+                "password": "password123",
+                "role": "member",
+            },
+        )
+        assert created.status_code == 200, created.text
+        old_user_id = created.json()["id"]
+
+        login(old_member_client, old_email, "password123")
+        assert old_member_client.get("/api/auth/me").json()["email"] == old_email
+
+        deleted = client.delete(f"/api/admin/users/{old_user_id}")
+        assert deleted.status_code == 200, deleted.text
+        assert old_member_client.get("/api/auth/me").status_code == 401
+
+        recreated = client.post(
+            "/api/admin/users",
+            json={
+                "email": new_email,
+                "display_name": "New Member",
+                "password": "password123",
+                "role": "member",
+            },
+        )
+        assert recreated.status_code == 200, recreated.text
+        assert recreated.json()["id"] != old_user_id
+        assert old_member_client.get("/api/auth/me").status_code == 401
+
+        users = client.get("/api/admin/users").json()
+        assert old_email not in {user["email"] for user in users}
+        assert new_email in {user["email"] for user in users}
+    app.dependency_overrides.clear()
+
+
+def test_disabling_user_revokes_existing_share(tmp_path: Path) -> None:
+    email = f"disabled-share-{tmp_path.name}@example.com"
+    photo_root = tmp_path / "disabled-share"
+    create_photo(photo_root / "shared.jpg")
+
+    client, test_engine = isolated_client(tmp_path)
+    member_client = TestClient(app)
+    public_client = TestClient(app)
+    with client, member_client, public_client:
+        login(client, "admin@example.com", "change-me-now")
+        member = client.post(
+            "/api/admin/users",
+            json={
+                "email": email,
+                "display_name": "Share Member",
+                "password": "password123",
+                "role": "member",
+            },
+        ).json()
+        library = client.post("/api/admin/libraries", json={"name": "Share Revoke", "path": str(photo_root)}).json()
+        with Session(test_engine) as session:
+            scan_library(session, library["id"])
+        client.put(
+            f"/api/admin/users/{member['id']}/permissions",
+            json=[{"library_id": library["id"], "can_view": True, "can_share": True}],
+        )
+        asset_id = client.get("/api/assets").json()[0]["id"]
+
+        login(member_client, email, "password123")
+        share = member_client.post("/api/shares", json={"asset_id": asset_id, "title": "Member Share"})
+        assert share.status_code == 200, share.text
+        token = share.json()["token"]
+        assert public_client.get(f"/api/public/shares/{token}/assets").status_code == 200
+
+        disabled = client.post(f"/api/admin/users/{member['id']}/disable")
+        assert disabled.status_code == 200, disabled.text
+        assert member_client.get("/api/auth/me").status_code == 401
+        assert public_client.get(f"/api/public/shares/{token}/assets").status_code == 404
+    app.dependency_overrides.clear()
+
+
+def test_permission_revocation_deactivates_existing_share(tmp_path: Path) -> None:
+    email = f"permission-share-{tmp_path.name}@example.com"
+    photo_root = tmp_path / "permission-share"
+    create_photo(photo_root / "shared.jpg")
+
+    client, test_engine = isolated_client(tmp_path)
+    member_client = TestClient(app)
+    public_client = TestClient(app)
+    with client, member_client, public_client:
+        login(client, "admin@example.com", "change-me-now")
+        member = client.post(
+            "/api/admin/users",
+            json={
+                "email": email,
+                "display_name": "Permission Member",
+                "password": "password123",
+                "role": "member",
+            },
+        ).json()
+        library = client.post("/api/admin/libraries", json={"name": "Permission Revoke", "path": str(photo_root)}).json()
+        with Session(test_engine) as session:
+            scan_library(session, library["id"])
+        client.put(
+            f"/api/admin/users/{member['id']}/permissions",
+            json=[{"library_id": library["id"], "can_view": True, "can_share": True}],
+        )
+        asset_id = client.get("/api/assets").json()[0]["id"]
+
+        login(member_client, email, "password123")
+        share = member_client.post("/api/shares", json={"asset_id": asset_id, "title": "Permission Share"})
+        assert share.status_code == 200, share.text
+        token = share.json()["token"]
+        assert public_client.get(f"/api/public/shares/{token}/assets").status_code == 200
+
+        permissions = client.put(
+            f"/api/admin/users/{member['id']}/permissions",
+            json=[{"library_id": library["id"], "can_view": True, "can_share": False}],
+        )
+        assert permissions.status_code == 200, permissions.text
+        assert public_client.get(f"/api/public/shares/{token}/assets").status_code == 404
+    app.dependency_overrides.clear()
+
+
+def test_admin_can_revoke_member_share(tmp_path: Path) -> None:
+    email = f"admin-revoke-share-{tmp_path.name}@example.com"
+    photo_root = tmp_path / "admin-revoke-share"
+    create_photo(photo_root / "shared.jpg")
+
+    client, test_engine = isolated_client(tmp_path)
+    member_client = TestClient(app)
+    public_client = TestClient(app)
+    with client, member_client, public_client:
+        login(client, "admin@example.com", "change-me-now")
+        member = client.post(
+            "/api/admin/users",
+            json={
+                "email": email,
+                "display_name": "Revoked Member",
+                "password": "password123",
+                "role": "member",
+            },
+        ).json()
+        library = client.post("/api/admin/libraries", json={"name": "Admin Revoke", "path": str(photo_root)}).json()
+        with Session(test_engine) as session:
+            scan_library(session, library["id"])
+        client.put(
+            f"/api/admin/users/{member['id']}/permissions",
+            json=[{"library_id": library["id"], "can_view": True, "can_share": True}],
+        )
+        asset_id = client.get("/api/assets").json()[0]["id"]
+
+        login(member_client, email, "password123")
+        share = member_client.post("/api/shares", json={"asset_id": asset_id, "title": "Admin Revoke Share"})
+        assert share.status_code == 200, share.text
+        share_id = share.json()["id"]
+        token = share.json()["token"]
+        assert public_client.get(f"/api/public/shares/{token}/assets").status_code == 200
+
+        revoked = client.delete(f"/api/admin/shares/{share_id}")
+        assert revoked.status_code == 200, revoked.text
+        assert public_client.get(f"/api/public/shares/{token}/assets").status_code == 404
+    app.dependency_overrides.clear()
+
+
+def test_member_cannot_modify_folder_metadata(tmp_path: Path) -> None:
+    email = f"folder-edit-{tmp_path.name}@example.com"
+    photo_root = tmp_path / "folder-edit"
+    create_photo(photo_root / "one.jpg")
+
+    client, test_engine = isolated_client(tmp_path)
+    member_client = TestClient(app)
+    with client, member_client:
+        login(client, "admin@example.com", "change-me-now")
+        member = client.post(
+            "/api/admin/users",
+            json={
+                "email": email,
+                "display_name": "Folder Member",
+                "password": "password123",
+                "role": "member",
+            },
+        ).json()
+        library = client.post("/api/admin/libraries", json={"name": "Folder Edit", "path": str(photo_root)}).json()
+        with Session(test_engine) as session:
+            scan_library(session, library["id"])
+        client.put(
+            f"/api/admin/users/{member['id']}/permissions",
+            json=[{"library_id": library["id"], "can_view": True, "can_share": False}],
+        )
+        folder = next(folder for folder in client.get("/api/folders").json() if folder["library_id"] == library["id"])
+        asset_id = client.get(f"/api/assets?folder_id={folder['id']}").json()[0]["id"]
+
+        login(member_client, email, "password123")
+        rename = member_client.patch(f"/api/folders/{folder['id']}/rename", json={"name": "Nope"})
+        cover = member_client.patch(f"/api/folders/{folder['id']}/cover", json={"cover_asset_id": asset_id})
+
+        assert rename.status_code == 403
+        assert cover.status_code == 403
+    app.dependency_overrides.clear()
+
+
 def test_delete_library_removes_index_and_keeps_original_files(tmp_path: Path) -> None:
     client, test_engine = isolated_client(tmp_path)
     photo_root = tmp_path / "delete-photos"

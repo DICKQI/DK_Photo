@@ -118,6 +118,9 @@ export const api = {
   enableUser(id: number) {
     return request<User>(`/api/admin/users/${id}/enable`, { method: 'POST' });
   },
+  deleteUser(id: number) {
+    return request<{ ok: boolean }>(`/api/admin/users/${id}`, { method: 'DELETE' });
+  },
   userPermissions(id: number) {
     return request<LibraryPermission[]>(`/api/admin/users/${id}/permissions`);
   },
@@ -135,6 +138,15 @@ export const api = {
   },
   adminShares() {
     return request<ShareLink[]>('/api/admin/shares');
+  },
+  updateAdminShare(id: number, payload: { title?: string; expires_in_days?: number; password?: string }) {
+    return request<ShareLink>(`/api/admin/shares/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    });
+  },
+  deleteAdminShare(id: number) {
+    return request<{ ok: boolean }>(`/api/admin/shares/${id}`, { method: 'DELETE' });
   },
   folders(parentId: number | null = null, libraryId?: number) {
     const params = new URLSearchParams();

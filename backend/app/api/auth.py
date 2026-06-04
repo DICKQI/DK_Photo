@@ -17,9 +17,9 @@ def login(payload: LoginRequest, response: Response, session: SessionDep) -> Use
     user = session.exec(select(User).where(User.email == payload.email.lower())).first()
     if not user or not verify_password(payload.password, user.password_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
-    if not user.is_active:
+    if not user.is_active or user.deleted_at:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User is inactive")
-    token = create_access_token(str(user.id), user.role)
+    token = create_access_token(str(user.id), user.role, user.token_version)
     response.set_cookie(
         "dk_photo_token",
         token,

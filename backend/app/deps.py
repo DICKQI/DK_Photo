@@ -28,12 +28,18 @@ def get_current_user(
         payload = decode_access_token(token)
     except jwt.PyJWTError as exc:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token") from exc
-    user_id = payload.get("sub")
-    if not user_id:
+    if payload.get("type") != "access":
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
-    user = session.get(User, int(user_id))
-    if not user or not user.is_active:
+    try:
+        user_id = int(payload.get("sub", ""))
+        token_version = int(payload.get("ver", ""))
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token") from exc
+    user = session.get(User, user_id)
+    if not user or not user.is_active or user.deleted_at:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User is inactive")
+    if user.token_version != token_version:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
     return user
 
 

@@ -251,11 +251,18 @@
                     <UserX v-else :size="16" />
                     {{ t('common.disable') }}
                   </button>
-                  <button v-else class="secondary-button" :disabled="isBusy(userEnableKey(user.id))" @click="enableUser(user)">
-                    <LoaderCircle v-if="isBusy(userEnableKey(user.id))" class="spin" :size="16" />
-                    <UserCheck v-else :size="16" />
-                    {{ t('common.enable') }}
-                  </button>
+                  <template v-else>
+                    <button class="secondary-button" :disabled="isBusy(userEnableKey(user.id))" @click="enableUser(user)">
+                      <LoaderCircle v-if="isBusy(userEnableKey(user.id))" class="spin" :size="16" />
+                      <UserCheck v-else :size="16" />
+                      {{ t('common.enable') }}
+                    </button>
+                    <button class="danger-button" :disabled="isBusy(userDeleteKey(user.id))" @click="openDeleteUser(user)">
+                      <LoaderCircle v-if="isBusy(userDeleteKey(user.id))" class="spin" :size="16" />
+                      <Trash2 v-else :size="16" />
+                      {{ t('common.delete') }}
+                    </button>
+                  </template>
                 </div>
               </div>
             </div>
@@ -359,9 +366,14 @@
               </div>
               <div class="row-actions">
                 <small class="status-pill" :class="shareStatusClass(share)">{{ shareStatusLabel(share) }}</small>
-                <button class="secondary-button compact-btn" @click="copyShareLink(share)">
-                  <Copy :size="14" />
-                  {{ t('common.copy') }}
+                <button class="icon-button compact-btn" :title="t('common.copy')" @click="copyShareLink(share)">
+                  <Copy :size="15" />
+                </button>
+                <button class="icon-button compact-btn" :title="t('common.edit')" :disabled="!!share.revoked_at" @click="openEditShare(share)">
+                  <Pencil :size="15" />
+                </button>
+                <button class="icon-button compact-btn" :title="t('common.delete')" :disabled="!!share.revoked_at" @click="openDeleteShare(share)">
+                  <Trash2 :size="15" />
                 </button>
               </div>
             </div>
@@ -376,6 +388,50 @@
       @close="showDirectoryPicker = false"
       @select="selectDirectory"
     />
+
+    <div v-if="editShareTarget" class="modal-backdrop" @click="closeEditShare">
+      <section class="small-modal" @click.stop>
+        <header class="modal-header">
+          <h2>{{ t('album.editShareLink') }}</h2>
+          <button class="icon-button" @click="closeEditShare">
+            <X :size="18" />
+          </button>
+        </header>
+        <label class="rename-label">{{ t('album.shareTitleLabel') }}</label>
+        <input v-model="editShareTitle" type="text" class="rename-input" maxlength="160" @keydown.escape="closeEditShare" />
+        <label class="rename-label" style="margin-top: 0.75rem">{{ t('album.shareExpiryLabel') }}</label>
+        <select v-model="editShareExpiry" class="rename-input">
+          <option :value="1">{{ t('album.shareExpiry1Day') }}</option>
+          <option :value="7">{{ t('album.shareExpiry7Days') }}</option>
+          <option :value="30">{{ t('album.shareExpiry30Days') }}</option>
+          <option :value="90">{{ t('album.shareExpiry90Days') }}</option>
+          <option :value="365">{{ t('album.shareExpiry365Days') }}</option>
+          <option :value="0">{{ t('album.shareExpiryNever') }}</option>
+        </select>
+        <label class="rename-label" style="margin-top: 0.75rem">{{ t('album.sharePasswordLabel') }}</label>
+        <input v-model="editSharePassword" type="password" class="rename-input" maxlength="128" :placeholder="t('album.sharePasswordPlaceholder')" @keydown.escape="closeEditShare" />
+        <footer class="modal-actions">
+          <button class="secondary-button" @click="closeEditShare">{{ t('common.cancel') }}</button>
+          <button class="primary-button" @click="confirmEditShare">{{ t('common.save') }}</button>
+        </footer>
+      </section>
+    </div>
+
+    <div v-if="deleteShareTarget" class="modal-backdrop" @click="closeDeleteShare">
+      <section class="small-modal" @click.stop>
+        <header class="modal-header">
+          <h2>{{ t('common.delete') }}</h2>
+          <button class="icon-button" @click="closeDeleteShare">
+            <X :size="18" />
+          </button>
+        </header>
+        <p>{{ t('album.confirmDeleteShare') }}</p>
+        <footer class="modal-actions">
+          <button class="secondary-button" @click="closeDeleteShare">{{ t('common.cancel') }}</button>
+          <button class="danger-button" @click="confirmDeleteShare">{{ t('common.delete') }}</button>
+        </footer>
+      </section>
+    </div>
 
     <div v-if="deleteLibraryTarget" class="modal-backdrop">
       <section class="small-modal">
@@ -415,6 +471,30 @@
           <button class="primary-button" :disabled="newPassword.length < 8 || isBusy(passwordKey(passwordUser.id))" @click="resetPassword">
             <LoaderCircle v-if="isBusy(passwordKey(passwordUser.id))" class="spin" :size="17" />
             {{ isBusy(passwordKey(passwordUser.id)) ? t('admin.resetting') : t('admin.reset') }}
+          </button>
+        </footer>
+      </section>
+    </div>
+
+    <div v-if="deleteUserTarget" class="modal-backdrop">
+      <section class="small-modal">
+        <header class="modal-header">
+          <h2>{{ t('admin.deleteUser') }}</h2>
+          <button class="icon-button" :disabled="isBusy(userDeleteKey(deleteUserTarget.id))" @click="closeDeleteUser">
+            <X :size="18" />
+          </button>
+        </header>
+        <div class="delete-library-summary">
+          <strong>{{ deleteUserTarget.display_name }}</strong>
+          <span>{{ deleteUserTarget.email }}</span>
+          <p>{{ t('admin.deleteUserWarning') }}</p>
+        </div>
+        <footer class="modal-actions">
+          <button class="secondary-button" :disabled="isBusy(userDeleteKey(deleteUserTarget.id))" @click="closeDeleteUser">{{ t('common.cancel') }}</button>
+          <button class="danger-button" :disabled="isBusy(userDeleteKey(deleteUserTarget.id))" @click="confirmDeleteUser">
+            <LoaderCircle v-if="isBusy(userDeleteKey(deleteUserTarget.id))" class="spin" :size="17" />
+            <Trash2 v-else :size="17" />
+            {{ isBusy(userDeleteKey(deleteUserTarget.id)) ? t('admin.deletingUser') : t('admin.confirmDeleteUser') }}
           </button>
         </footer>
       </section>
@@ -529,6 +609,11 @@ const userStatusFilter = ref<'all' | 'active' | 'disabled'>('all');
 const userRoleFilter = ref<'all' | 'admin' | 'member'>('all');
 const jobStatusFilter = ref<'all' | 'running' | 'queued' | 'finished' | 'failed'>('all');
 const shareStatusFilter = ref<'all' | 'active' | 'expiring' | 'expired' | 'never' | 'revoked'>('all');
+const editShareTarget = ref<ShareLink | null>(null);
+const editShareTitle = ref('');
+const editShareExpiry = ref(7);
+const editSharePassword = ref<string | undefined>(undefined);
+const deleteShareTarget = ref<ShareLink | null>(null);
 const editingLibraryId = ref<number | null>(null);
 const refreshKey = 'refresh';
 const createLibraryKey = 'library:create';
@@ -538,6 +623,7 @@ const showDirectoryPicker = ref(false);
 const passwordUser = ref<User | null>(null);
 const permissionUser = ref<User | null>(null);
 const deleteLibraryTarget = ref<Library | null>(null);
+const deleteUserTarget = ref<User | null>(null);
 const newPassword = ref('');
 const newUser = reactive({ email: '', displayName: '', password: '', role: 'member' });
 const libraryEditBuffer = reactive<Record<number, string>>({});
@@ -800,6 +886,31 @@ async function enableUser(user: User) {
   }
 }
 
+function openDeleteUser(user: User) {
+  deleteUserTarget.value = user;
+}
+
+function closeDeleteUser() {
+  if (deleteUserTarget.value && isBusy(userDeleteKey(deleteUserTarget.value.id))) return;
+  deleteUserTarget.value = null;
+}
+
+async function confirmDeleteUser() {
+  const user = deleteUserTarget.value;
+  if (!user) return;
+  const key = userDeleteKey(user.id);
+  startBusy(key);
+  try {
+    await api.deleteUser(user.id);
+    deleteUserTarget.value = null;
+    await reloadAfterMutation(t('admin.userDeleted'));
+  } catch (err) {
+    showMessage(errorMessage(err, t('admin.unableDeleteUser')), 'error');
+  } finally {
+    stopBusy(key);
+  }
+}
+
 async function openPermissions(user: User) {
   const key = permissionLoadKey(user.id);
   startBusy(key);
@@ -938,6 +1049,10 @@ function userEnableKey(id: number) {
   return `user:enable:${id}`;
 }
 
+function userDeleteKey(id: number) {
+  return `user:delete:${id}`;
+}
+
 function showMessage(value: string, kind: 'success' | 'error' = 'success') {
   message.value = value;
   messageKind.value = kind;
@@ -1041,6 +1156,66 @@ async function copyShareLink(share: ShareLink) {
     showMessage(t('admin.shareCopied'));
   } catch (err) {
     showMessage(errorMessage(err, t('admin.unableCopyShare')), 'error');
+  }
+}
+
+function openEditShare(share: ShareLink) {
+  editShareTarget.value = share;
+  editShareTitle.value = share.title;
+  editSharePassword.value = undefined;
+  if (share.expires_at) {
+    const diff = Math.ceil((new Date(share.expires_at).getTime() - Date.now()) / 86400000);
+    editShareExpiry.value = diff > 0 ? diff : 1;
+  } else {
+    editShareExpiry.value = 0;
+  }
+}
+
+function closeEditShare() {
+  editShareTarget.value = null;
+  editShareTitle.value = '';
+  editShareExpiry.value = 7;
+  editSharePassword.value = undefined;
+}
+
+async function confirmEditShare() {
+  const share = editShareTarget.value;
+  if (!share) return;
+  try {
+    const payload: { title?: string; expires_in_days?: number; password?: string } = {};
+    if (editShareTitle.value !== share.title) payload.title = editShareTitle.value;
+    payload.expires_in_days = editShareExpiry.value;
+    if (editSharePassword.value !== undefined) {
+      payload.password = editSharePassword.value || '';
+    }
+    const updated = await api.updateAdminShare(share.id, payload);
+    const idx = shares.value.findIndex((s) => s.id === share.id);
+    if (idx !== -1) shares.value[idx] = updated;
+    showMessage(t('album.shareUpdated'));
+    closeEditShare();
+  } catch (err) {
+    showMessage(errorMessage(err, t('album.unableUpdateShare')), 'error');
+  }
+}
+
+function openDeleteShare(share: ShareLink) {
+  deleteShareTarget.value = share;
+}
+
+function closeDeleteShare() {
+  deleteShareTarget.value = null;
+}
+
+async function confirmDeleteShare() {
+  const share = deleteShareTarget.value;
+  if (!share) return;
+  try {
+    await api.deleteAdminShare(share.id);
+    shares.value = shares.value.filter((s) => s.id !== share.id);
+    showMessage(t('album.shareDeleted'));
+    closeDeleteShare();
+  } catch (err) {
+    showMessage(errorMessage(err, t('album.unableDeleteShare')), 'error');
   }
 }
 

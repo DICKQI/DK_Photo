@@ -90,8 +90,8 @@ Vite 开发服务器会将 `/api` 请求代理到 `http://localhost:8000`。
 | | `POST` | `/api/auth/logout` | 无 | 退出登录 |
 | 文件夹 | `GET` | `/api/folders` | 用户 | 列出文件夹 |
 | | `GET` | `/api/folders/{id}` | 用户 | 文件夹详情（含祖先链） |
-| | `PATCH` | `/api/folders/{id}/cover` | 用户 | 更改文件夹封面 |
-| | `PATCH` | `/api/folders/{id}/rename` | 用户 | 重命名文件夹 |
+| | `PATCH` | `/api/folders/{id}/cover` | 管理员 | 更改文件夹封面 |
+| | `PATCH` | `/api/folders/{id}/rename` | 管理员 | 重命名文件夹 |
 | 资源 | `GET` | `/api/assets` | 用户 | 列出/搜索/筛选资源 |
 | | `GET` | `/api/assets/tags` | 用户 | 列出所有标签及数量 |
 | | `GET` | `/api/assets/ratings` | 用户 | 列出评分分布 |
@@ -143,6 +143,8 @@ Vite 开发服务器会将 `/api` 请求代理到 `http://localhost:8000`。
 | | `GET` | `/api/admin/users/{id}/permissions` | 管理员 | 查看用户图库权限 |
 | | `PUT` | `/api/admin/users/{id}/permissions` | 管理员 | 更新用户图库权限 |
 | | `GET` | `/api/admin/shares` | 管理员 | 列出所有分享链接 |
+| | `PATCH` | `/api/admin/shares/{id}` | 管理员 | 更新任意分享链接 |
+| | `DELETE` | `/api/admin/shares/{id}` | 管理员 | 撤销任意分享链接 |
 | | `GET` | `/api/admin/filesystem/roots` | 管理员 | 列出文件系统根目录 |
 | | `GET` | `/api/admin/filesystem/children` | 管理员 | 浏览子目录 |
 | 健康 | `GET` | `/api/health` | 无 | 健康检查 |

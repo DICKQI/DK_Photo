@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+from datetime import timedelta
 from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, status
 from sqlalchemy import or_
-from sqlmodel import select
+from sqlmodel import Session, select
 
 from app.config import settings
 from app.deps import AdminUser, SessionDep
@@ -23,6 +24,7 @@ from app.models import (
     ShareLink,
     Thumbnail,
     User,
+    utc_now,
 )
 from app.schemas import (
     FilesystemChildren,
@@ -35,6 +37,7 @@ from app.schemas import (
     PasswordReset,
     ScanJobRead,
     ShareRead,
+    ShareUpdate,
     UserCreate,
     UserRead,
     UserUpdate,
@@ -225,23 +228,87 @@ def list_jobs(session: SessionDep, _: AdminUser) -> list[ScanJob]:
     return session.exec(select(ScanJob).order_by(ScanJob.id.desc()).limit(40)).all()
 
 
+def managed_user(session: Session, user_id: int) -> User:
+    user = session.get(User, user_id)
+    if not user or user.deleted_at:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    return user
+
+
+def revoke_user_shares(session: Session, user_id: int) -> None:
+    now = utc_now()
+    shares = session.exec(
+        select(ShareLink).where(ShareLink.creator_id == user_id, ShareLink.revoked_at == None)
+    ).all()
+    for share in shares:
+        share.revoked_at = now
+        session.add(share)
+
+
+def revoke_user_shares_outside_libraries(session: Session, user_id: int, allowed_library_ids: set[int]) -> None:
+    now = utc_now()
+    shares = session.exec(
+        select(ShareLink).where(ShareLink.creator_id == user_id, ShareLink.revoked_at == None)
+    ).all()
+    for share in shares:
+        library_ids = share_library_ids(session, share)
+        if not library_ids or not library_ids.issubset(allowed_library_ids):
+            share.revoked_at = now
+            session.add(share)
+
+
+def share_library_ids(session: Session, share: ShareLink) -> set[int]:
+    if share.asset_id:
+        asset = session.get(Asset, share.asset_id)
+        return {asset.library_id} if asset else set()
+    if share.folder_id:
+        folder = session.get(Folder, share.folder_id)
+        return {folder.library_id} if folder else set()
+    assets = session.exec(
+        select(Asset)
+        .join(ShareAsset, ShareAsset.asset_id == Asset.id)
+        .where(ShareAsset.share_id == share.id)
+    ).all()
+    return {asset.library_id for asset in assets}
+
+
+def delete_user_personal_data(session: Session, user_id: int) -> None:
+    for permission in session.exec(select(LibraryPermission).where(LibraryPermission.user_id == user_id)).all():
+        session.delete(permission)
+    for favorite in session.exec(select(AssetFavorite).where(AssetFavorite.user_id == user_id)).all():
+        session.delete(favorite)
+    for tag in session.exec(select(AssetTag).where(AssetTag.user_id == user_id)).all():
+        session.delete(tag)
+    for metadata in session.exec(select(AssetMetadata).where(AssetMetadata.user_id == user_id)).all():
+        session.delete(metadata)
+    albums = session.exec(select(PhotoAlbum).where(PhotoAlbum.owner_id == user_id)).all()
+    album_ids = [album.id for album in albums if album.id is not None]
+    if album_ids:
+        album_assets = session.exec(select(PhotoAlbumAsset).where(PhotoAlbumAsset.album_id.in_(album_ids))).all()  # type: ignore[attr-defined]
+        for album_asset in album_assets:
+            session.delete(album_asset)
+    for album in albums:
+        session.delete(album)
+
+
 @router.get("/users", response_model=list[UserRead])
 def list_users(session: SessionDep, _: AdminUser) -> list[User]:
-    return session.exec(select(User).order_by(User.created_at.desc())).all()
+    return session.exec(
+        select(User).where(User.deleted_at == None).order_by(User.created_at.desc())
+    ).all()
 
 
 @router.get("/users/{user_id}", response_model=UserRead)
 def get_user(user_id: int, session: SessionDep, _: AdminUser) -> User:
-    user = session.get(User, user_id)
-    if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
-    return user
+    return managed_user(session, user_id)
 
 
 @router.post("/users", response_model=UserRead)
 def create_user(payload: UserCreate, session: SessionDep, _: AdminUser) -> User:
     role = payload.role if payload.role in {"admin", "member"} else "member"
-    existing = session.exec(select(User).where(User.email == payload.email.lower())).first()
+    existing = session.exec(
+        select(User).where(User.email == payload.email.lower(), User.deleted_at == None)
+    ).first()
     if existing:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="User already exists")
     user = User(
@@ -258,11 +325,15 @@ def create_user(payload: UserCreate, session: SessionDep, _: AdminUser) -> User:
 
 @router.patch("/users/{user_id}", response_model=UserRead)
 def update_user(user_id: int, payload: UserUpdate, session: SessionDep, _: AdminUser) -> User:
-    user = session.get(User, user_id)
-    if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    user = managed_user(session, user_id)
     if payload.email and payload.email.lower() != user.email:
-        existing = session.exec(select(User).where(User.email == payload.email.lower(), User.id != user_id)).first()
+        existing = session.exec(
+            select(User).where(
+                User.email == payload.email.lower(),
+                User.id != user_id,
+                User.deleted_at == None,
+            )
+        ).first()
         if existing:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="User already exists")
         user.email = payload.email.lower()
@@ -277,22 +348,41 @@ def update_user(user_id: int, payload: UserUpdate, session: SessionDep, _: Admin
 
 @router.post("/users/{user_id}/password")
 def reset_user_password(user_id: int, payload: PasswordReset, session: SessionDep, _: AdminUser) -> dict[str, bool]:
-    user = session.get(User, user_id)
-    if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    user = managed_user(session, user_id)
     user.password_hash = hash_password(payload.password)
+    user.token_version += 1
+    session.commit()
+    return {"ok": True}
+
+
+@router.delete("/users/{user_id}")
+def delete_user(user_id: int, session: SessionDep, admin: AdminUser) -> dict[str, bool]:
+    user = managed_user(session, user_id)
+    if user.id == admin.id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="You cannot delete your own account")
+
+    revoke_user_shares(session, user_id)
+    delete_user_personal_data(session, user_id)
+    now = utc_now()
+    user.is_active = False
+    user.role = "member"
+    user.token_version += 1
+    user.deleted_at = now
+    user.email = f"deleted-user-{user.id}-{int(now.timestamp())}@deleted.local"
+    user.display_name = "Deleted User"
+    session.add(user)
     session.commit()
     return {"ok": True}
 
 
 @router.post("/users/{user_id}/disable", response_model=UserRead)
 def disable_user(user_id: int, session: SessionDep, admin: AdminUser) -> User:
-    user = session.get(User, user_id)
-    if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    user = managed_user(session, user_id)
     if user.id == admin.id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="You cannot disable your own account")
     user.is_active = False
+    user.token_version += 1
+    revoke_user_shares(session, user_id)
     session.commit()
     session.refresh(user)
     return user
@@ -300,9 +390,7 @@ def disable_user(user_id: int, session: SessionDep, admin: AdminUser) -> User:
 
 @router.post("/users/{user_id}/enable", response_model=UserRead)
 def enable_user(user_id: int, session: SessionDep, _: AdminUser) -> User:
-    user = session.get(User, user_id)
-    if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    user = managed_user(session, user_id)
     user.is_active = True
     session.commit()
     session.refresh(user)
@@ -311,9 +399,7 @@ def enable_user(user_id: int, session: SessionDep, _: AdminUser) -> User:
 
 @router.get("/users/{user_id}/permissions", response_model=list[LibraryPermissionRead])
 def get_user_permissions(user_id: int, session: SessionDep, _: AdminUser) -> list[LibraryPermission]:
-    user = session.get(User, user_id)
-    if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    managed_user(session, user_id)
     return session.exec(select(LibraryPermission).where(LibraryPermission.user_id == user_id)).all()
 
 
@@ -324,9 +410,7 @@ def update_user_permissions(
     session: SessionDep,
     _: AdminUser,
 ) -> list[LibraryPermission]:
-    user = session.get(User, user_id)
-    if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    user = managed_user(session, user_id)
     existing = session.exec(select(LibraryPermission).where(LibraryPermission.user_id == user_id)).all()
     by_library = {item.library_id: item for item in existing}
     seen_library_ids: set[int] = set()
@@ -357,6 +441,12 @@ def update_user_permissions(
         if permission.library_id not in seen_library_ids:
             session.delete(permission)
 
+    if user.role != "admin":
+        allowed_share_library_ids = {
+            item.library_id for item in payload if item.can_view and item.can_share
+        }
+        revoke_user_shares_outside_libraries(session, user_id, allowed_share_library_ids)
+
     session.commit()
     return session.exec(select(LibraryPermission).where(LibraryPermission.user_id == user_id)).all()
 
@@ -365,6 +455,44 @@ def update_user_permissions(
 def list_shares(session: SessionDep, _: AdminUser) -> list[ShareRead]:
     shares = session.exec(select(ShareLink).order_by(ShareLink.created_at.desc())).all()
     return [share_read(session, share) for share in shares]
+
+
+@router.patch("/shares/{share_id}", response_model=ShareRead)
+def update_any_share(share_id: int, payload: ShareUpdate, session: SessionDep, _: AdminUser) -> ShareRead:
+    share = session.get(ShareLink, share_id)
+    if not share:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Share not found")
+    if share.revoked_at:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Share is already revoked")
+    if payload.title is not None:
+        share.title = payload.title
+    if payload.expires_in_days is not None:
+        if payload.expires_in_days > 0:
+            share.expires_at = utc_now() + timedelta(days=payload.expires_in_days)
+        else:
+            share.expires_at = None
+    if payload.password is not None:
+        if payload.password:
+            share.password_hash = hash_password(payload.password)
+        else:
+            share.password_hash = None
+    session.add(share)
+    session.commit()
+    session.refresh(share)
+    return share_read(session, share)
+
+
+@router.delete("/shares/{share_id}")
+def revoke_any_share(share_id: int, session: SessionDep, _: AdminUser) -> dict[str, bool]:
+    share = session.get(ShareLink, share_id)
+    if not share:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Share not found")
+    if share.revoked_at:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Share is already revoked")
+    share.revoked_at = utc_now()
+    session.add(share)
+    session.commit()
+    return {"ok": True}
 
 
 @router.post("/maintenance/cleanup-thumbnails")

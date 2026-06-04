@@ -13,11 +13,11 @@ from sqlmodel import select
 from app.config import settings
 from app.deps import CurrentUser, SessionDep
 from app.api.assets import stream_asset_archive
-from app.models import Asset, Folder, LibraryRoot, ShareAsset, ShareLink
+from app.models import Asset, Folder, LibraryRoot, ShareAsset, ShareLink, User
 from app.schemas import AssetRead, PublicShareRead, ShareCreate, ShareRead, ShareUpdate, ShareVerifyRequest
 from app.security import hash_password, verify_password
 from app.services.paths import safe_asset_path
-from app.services.permissions import require_asset_access, require_folder_access
+from app.services.permissions import can_access_library, require_asset_access, require_folder_access
 from app.services.thumbnails import ensure_thumbnail
 
 
@@ -157,7 +157,36 @@ def get_active_share(session: SessionDep, token: str) -> ShareLink:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Share not found")
     if share.expires_at and share.expires_at < datetime.utcnow():
         raise HTTPException(status_code=status.HTTP_410_GONE, detail="Share expired")
+    if not creator_can_still_share(session, share):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Share not found")
     return share
+
+
+def creator_can_still_share(session: SessionDep, share: ShareLink) -> bool:
+    creator = session.get(User, share.creator_id)
+    if not creator or not creator.is_active or creator.deleted_at:
+        return False
+    if creator.role == "admin":
+        return True
+    library_ids = public_share_library_ids(session, share)
+    if not library_ids:
+        return False
+    return all(can_access_library(session, creator, library_id, require_share=True) for library_id in library_ids)
+
+
+def public_share_library_ids(session: SessionDep, share: ShareLink) -> set[int]:
+    if share.asset_id:
+        asset = session.get(Asset, share.asset_id)
+        return {asset.library_id} if asset else set()
+    if share.folder_id:
+        folder = session.get(Folder, share.folder_id)
+        return {folder.library_id} if folder else set()
+    assets = session.exec(
+        select(Asset)
+        .join(ShareAsset, ShareAsset.asset_id == Asset.id)
+        .where(ShareAsset.share_id == share.id)
+    ).all()
+    return {asset.library_id for asset in assets}
 
 
 @router.get("/api/public/shares/{token}", response_model=PublicShareRead)

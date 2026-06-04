@@ -17,6 +17,8 @@ class User(SQLModel, table=True):
     role: str = Field(default="member", index=True)
     password_hash: str
     is_active: bool = Field(default=True)
+    token_version: int = Field(default=0)
+    deleted_at: Optional[datetime] = Field(default=None, index=True)
     created_at: datetime = Field(default_factory=utc_now)
 
 

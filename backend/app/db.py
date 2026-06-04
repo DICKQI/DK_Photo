@@ -31,6 +31,12 @@ def run_lightweight_migrations() -> None:
     if "is_active" not in user_columns:
         with engine.begin() as connection:
             connection.execute(text("ALTER TABLE user ADD COLUMN is_active BOOLEAN NOT NULL DEFAULT 1"))
+    if "token_version" not in user_columns:
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE user ADD COLUMN token_version INTEGER NOT NULL DEFAULT 0"))
+    if "deleted_at" not in user_columns:
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE user ADD COLUMN deleted_at DATETIME"))
     asset_columns = {column["name"] for column in inspector.get_columns("asset")} if inspector.has_table("asset") else set()
     asset_migrations = {
         "camera_make": "ALTER TABLE asset ADD COLUMN camera_make VARCHAR",
@@ -63,7 +69,9 @@ def get_session() -> Generator[Session, None, None]:
 
 
 def ensure_initial_admin(session: Session) -> None:
-    existing = session.exec(select(User).where(User.email == settings.admin_email.lower())).first()
+    existing = session.exec(
+        select(User).where(User.email == settings.admin_email.lower(), User.deleted_at == None)
+    ).first()
     if existing:
         return
     admin = User(
