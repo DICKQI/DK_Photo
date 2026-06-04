@@ -6,7 +6,7 @@
         <h1>{{ share?.title || t('share.sharedPhotos') }}</h1>
         <p class="muted">{{ shareSubtitle }}</p>
       </div>
-      <div class="share-header-actions">
+      <div v-if="!needsPassword" class="share-header-actions">
         <LanguageToggle />
         <button class="secondary-button" @click="copyShareLink">
           <Link2 :size="16" />
@@ -22,6 +22,28 @@
         </span>
       </div>
     </header>
+
+    <section v-if="needsPassword" class="share-password-section">
+      <div class="share-password-card">
+        <Lock :size="32" />
+        <strong>{{ t('share.passwordRequired') }}</strong>
+        <span>{{ t('share.passwordHint') }}</span>
+        <form class="share-password-form" @submit.prevent="verifyPassword">
+          <input
+            v-model="passwordInput"
+            type="password"
+            class="rename-input"
+            :placeholder="t('share.passwordPlaceholder')"
+            autofocus
+          />
+          <p v-if="passwordError" class="share-password-error">{{ passwordError }}</p>
+          <button class="primary-button" :disabled="!passwordInput.trim() || verifyingPassword" type="submit">
+            <LoaderCircle v-if="verifyingPassword" class="spin" :size="16" />
+            {{ verifyingPassword ? t('share.verifying') : t('share.unlock') }}
+          </button>
+        </form>
+      </div>
+    </section>
 
     <section v-if="loading" class="empty-state">
       <div class="skeleton-grid" :aria-label="t('share.loadingSharedPhotos')">
@@ -153,7 +175,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
-import { ArrowDownAZ, ArrowUpAZ, Clock, Download, ImageOff, Images, LayoutGrid, Link2, LoaderCircle, Maximize2, Play } from 'lucide-vue-next';
+import { ArrowDownAZ, ArrowUpAZ, Clock, Download, ImageOff, Images, LayoutGrid, Link2, LoaderCircle, Lock, Maximize2, Play } from 'lucide-vue-next';
 import LanguageToggle from '../components/LanguageToggle.vue';
 import PhotoViewer from '../components/PhotoViewer.vue';
 import { useLocale } from '../composables/useLocale';
@@ -172,6 +194,10 @@ const share = ref<PublicShare | null>(null);
 const assets = ref<Asset[]>([]);
 const loading = ref(true);
 const error = ref('');
+const needsPassword = ref(false);
+const passwordInput = ref('');
+const passwordError = ref('');
+const verifyingPassword = ref(false);
 const sortMode = ref<ShareSortMode>(storedShareSortMode());
 const sortDirection = ref<ShareSortDirection>(storedShareSortDirection());
 const tileMode = ref<ShareTileMode>(storedShareTileMode());
@@ -218,6 +244,11 @@ watch(mediaFilter, (value) => {
 onMounted(async () => {
   try {
     share.value = await api.publicShare(token);
+    if (share.value.has_password) {
+      needsPassword.value = true;
+      loading.value = false;
+      return;
+    }
     assets.value = await api.publicShareAssets(token);
   } catch (err) {
     error.value = err instanceof Error ? err.message : t('share.unavailable');
@@ -232,6 +263,23 @@ onBeforeUnmount(() => {
 
 function openViewer(index: number) {
   viewerIndex.value = index;
+}
+
+async function verifyPassword() {
+  if (!passwordInput.value.trim() || verifyingPassword.value) return;
+  verifyingPassword.value = true;
+  passwordError.value = '';
+  try {
+    await api.verifySharePassword(token, passwordInput.value);
+    needsPassword.value = false;
+    loading.value = true;
+    assets.value = await api.publicShareAssets(token);
+  } catch (err) {
+    passwordError.value = err instanceof Error ? err.message : t('share.passwordError');
+  } finally {
+    verifyingPassword.value = false;
+    loading.value = false;
+  }
 }
 
 async function copyShareLink() {

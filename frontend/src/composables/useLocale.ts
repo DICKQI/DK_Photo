@@ -65,6 +65,8 @@ const en = {
   'common.photosUnit': 'photos',
   'common.mediaUnit': 'media item',
   'common.mediaItemsUnit': 'media items',
+  'common.albumUnit': 'album',
+  'common.albumsUnit': 'albums',
   'common.libraryUnit': 'library',
   'common.librariesUnit': 'libraries',
   'common.accountUnit': 'account',
@@ -119,6 +121,8 @@ const en = {
   'album.clearAlbumFilter': 'Clear album filter',
   'album.noMatchingAlbums': 'No matching albums',
   'album.noAlbumsMatch': 'No albums match "{query}"',
+  'album.albumCount': '{count}',
+  'album.albumMediaTotal': '{count} total',
   'album.sortAlbums': 'Sort albums',
   'album.sortAlbumsByUpdated': 'Sort albums by last updated',
   'album.sortAlbumsByName': 'Sort albums by name',
@@ -186,6 +190,7 @@ const en = {
   'album.noLibrariesMatch': 'No libraries match "{query}"',
   'album.libraryEyebrow': 'Library',
   'album.loadingPhotos': 'Loading media',
+  'album.loadMore': 'Load more media',
   'album.noMatchesFound': 'No matches found',
   'album.noPhotosHere': 'No media here yet',
   'album.noLocationPhotos': 'No located media',
@@ -353,6 +358,8 @@ const en = {
   'album.shareExpiry365Days': '365 days',
   'album.shareExpiryNever': 'Never',
   'album.shareTitleLabel': 'Title (optional)',
+  'album.sharePasswordLabel': 'Password (optional)',
+  'album.sharePasswordPlaceholder': 'Leave blank for no password',
   'album.createShareLink': 'Create share link',
   'album.editShareLink': 'Edit share link',
   'album.confirmDeleteShare': 'Delete this share link? It will no longer be accessible.',
@@ -583,6 +590,12 @@ const en = {
   'share.unopenable': 'This shared link cannot be opened.',
   'share.available': '{media} available from this shared link.',
   'share.unavailable': 'Share unavailable',
+  'share.passwordRequired': 'Password Required',
+  'share.passwordHint': 'This share is password-protected. Enter the password to view the media.',
+  'share.passwordPlaceholder': 'Enter password',
+  'share.passwordError': 'Incorrect password',
+  'share.verifying': 'Verifying',
+  'share.unlock': 'Unlock',
 } as const;
 
 const zhCN: Record<keyof typeof en, string> = {
@@ -650,6 +663,8 @@ const zhCN: Record<keyof typeof en, string> = {
   'common.photosUnit': '张照片',
   'common.mediaUnit': '个媒体',
   'common.mediaItemsUnit': '个媒体',
+  'common.albumUnit': '个相册',
+  'common.albumsUnit': '个相册',
   'common.libraryUnit': '个图库',
   'common.librariesUnit': '个图库',
   'common.accountUnit': '个账号',
@@ -704,6 +719,8 @@ const zhCN: Record<keyof typeof en, string> = {
   'album.clearAlbumFilter': '清除相册筛选',
   'album.noMatchingAlbums': '没有匹配的相册',
   'album.noAlbumsMatch': '没有相册匹配“{query}”',
+  'album.albumCount': '{count}',
+  'album.albumMediaTotal': '共 {count}',
   'album.sortAlbums': '相册排序',
   'album.sortAlbumsByUpdated': '按最近更新排序相册',
   'album.sortAlbumsByName': '按名称排序相册',
@@ -771,6 +788,7 @@ const zhCN: Record<keyof typeof en, string> = {
   'album.noLibrariesMatch': '没有图库匹配“{query}”',
   'album.libraryEyebrow': '图库',
   'album.loadingPhotos': '正在加载媒体',
+  'album.loadMore': '加载更多媒体',
   'album.noMatchesFound': '没有匹配结果',
   'album.noPhotosHere': '这里还没有媒体',
   'album.noLocationPhotos': '还没有带地点的媒体',
@@ -938,6 +956,8 @@ const zhCN: Record<keyof typeof en, string> = {
   'album.shareExpiry365Days': '365 天',
   'album.shareExpiryNever': '永不失效',
   'album.shareTitleLabel': '标题（可选）',
+  'album.sharePasswordLabel': '密码（可选）',
+  'album.sharePasswordPlaceholder': '留空不设密码',
   'album.createShareLink': '创建分享链接',
   'album.editShareLink': '编辑分享链接',
   'album.confirmDeleteShare': '删除此分享链接？它将不再可用。',
@@ -1168,6 +1188,12 @@ const zhCN: Record<keyof typeof en, string> = {
   'share.unopenable': '无法打开此分享链接。',
   'share.available': '此分享链接中有 {media} 可用。',
   'share.unavailable': '分享不可用',
+  'share.passwordRequired': '需要密码',
+  'share.passwordHint': '此分享受密码保护，请输入密码查看媒体。',
+  'share.passwordPlaceholder': '输入密码',
+  'share.passwordError': '密码错误',
+  'share.verifying': '验证中',
+  'share.unlock': '解锁',
 };
 
 export const messages = {
@@ -1178,7 +1204,7 @@ export const messages = {
 export type Locale = keyof typeof messages;
 export type TranslationKey = keyof typeof en;
 type TranslationParams = Record<string, string | number>;
-type CountUnit = 'photo' | 'folder' | 'library' | 'account' | 'source' | 'original' | 'media';
+type CountUnit = 'photo' | 'folder' | 'library' | 'account' | 'source' | 'original' | 'media' | 'album';
 type StorageLike = Pick<Storage, 'getItem' | 'setItem'>;
 
 const storageKey = 'dk-photo-locale';
@@ -1186,6 +1212,7 @@ const fallbackLocale: Locale = 'en';
 const countUnitKeys: Record<CountUnit, { one: TranslationKey; other: TranslationKey }> = {
   photo: { one: 'common.photoUnit', other: 'common.photosUnit' },
   media: { one: 'common.mediaUnit', other: 'common.mediaItemsUnit' },
+  album: { one: 'common.albumUnit', other: 'common.albumsUnit' },
   folder: { one: 'common.folderUnit', other: 'common.foldersUnit' },
   library: { one: 'common.libraryUnit', other: 'common.librariesUnit' },
   account: { one: 'common.accountUnit', other: 'common.accountsUnit' },

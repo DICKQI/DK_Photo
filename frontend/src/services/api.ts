@@ -163,7 +163,7 @@ export const api = {
     search = '',
     recursive = false,
     favoritesOnly = false,
-    options: { sort?: 'name' | 'recent'; limit?: number; mediaType?: 'all' | 'image' | 'video'; hasLocation?: boolean; tag?: string; minRating?: number; camera?: string; lens?: string; place?: string } = {},
+    options: { sort?: 'name' | 'recent'; limit?: number; offset?: number; mediaType?: 'all' | 'image' | 'video'; hasLocation?: boolean; tag?: string; minRating?: number; camera?: string; lens?: string; place?: string } = {},
   ) {
     const params = new URLSearchParams();
     if (folderId !== null) params.set('folder_id', String(folderId));
@@ -172,6 +172,7 @@ export const api = {
     if (favoritesOnly) params.set('favorites_only', 'true');
     if (options.sort) params.set('sort', options.sort);
     if (options.limit) params.set('limit', String(options.limit));
+    if (options.offset) params.set('offset', String(options.offset));
     if (options.mediaType && options.mediaType !== 'all') params.set('media_type', options.mediaType);
     if (options.hasLocation) params.set('has_location', 'true');
     if (options.tag) params.set('tag', options.tag);
@@ -292,7 +293,7 @@ export const api = {
       body: JSON.stringify({ asset_ids: assetIds }),
     });
   },
-  createShare(payload: { title?: string; asset_id?: number; folder_id?: number; asset_ids?: number[]; expires_in_days?: number }) {
+  createShare(payload: { title?: string; asset_id?: number; folder_id?: number; asset_ids?: number[]; expires_in_days?: number; password?: string }) {
     return request<ShareLink>('/api/shares', {
       method: 'POST',
       body: JSON.stringify(payload),
@@ -304,7 +305,7 @@ export const api = {
   deleteShare(id: number) {
     return request<{ ok: boolean }>(`/api/shares/${id}`, { method: 'DELETE' });
   },
-  updateShare(id: number, payload: { title?: string; expires_in_days?: number }) {
+  updateShare(id: number, payload: { title?: string; expires_in_days?: number; password?: string }) {
     return request<ShareLink>(`/api/shares/${id}`, {
       method: 'PATCH',
       body: JSON.stringify(payload),
@@ -312,6 +313,12 @@ export const api = {
   },
   publicShare(token: string) {
     return request<PublicShare>(`/api/public/shares/${token}`);
+  },
+  verifySharePassword(token: string, password: string) {
+    return request<{ verified: boolean; access_token: string | null }>(`/api/public/shares/${token}/verify`, {
+      method: 'POST',
+      body: JSON.stringify({ password }),
+    });
   },
   publicShareAssets(token: string) {
     return request<Asset[]>(`/api/public/shares/${token}/assets`);

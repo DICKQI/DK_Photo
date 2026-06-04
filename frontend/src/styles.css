@@ -317,6 +317,7 @@ body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
+  overflow-x: hidden;
 }
 
 button,
@@ -642,17 +643,71 @@ select:focus {
 .app-shell {
   display: grid;
   min-height: 100vh;
-  grid-template-columns: 280px 1fr;
+  grid-template-columns: 280px minmax(0, 1fr);
   background: #f5f7fb;
 }
 
 .sidebar {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 10px;
+  height: 100vh;
+  height: 100dvh;
+  min-height: 0;
+  position: sticky;
+  top: 0;
   border-right: 1px solid var(--border);
   background: #fff;
-  padding: 18px;
+  padding: 14px;
+  overflow: hidden;
+}
+
+.sidebar-scroll {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 10px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 2px;
+}
+
+.sidebar-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+
+.sidebar-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.sidebar-scroll::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(60, 72, 100, 0.18);
+}
+
+.sidebar-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(60, 72, 100, 0.32);
+}
+
+.sidebar-sticky-top {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 10px;
+  background: #fff;
+  padding-bottom: 6px;
+}
+
+.sidebar-bottom-fixed {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 8px;
+  background: #fff;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
 }
 
 .brand-row {
@@ -671,13 +726,14 @@ select:focus {
 
 .brand-mark {
   display: grid;
-  width: 42px;
-  height: 42px;
+  width: 36px;
+  height: 36px;
   place-items: center;
   border-radius: 8px;
   background: var(--accent);
   color: #fff;
   font-weight: 800;
+  font-size: 0.85rem;
 }
 
 .sidebar-action,
@@ -751,6 +807,26 @@ select:focus {
   font-size: 0.75rem;
   font-weight: 850;
   text-transform: uppercase;
+  cursor: pointer;
+  user-select: none;
+}
+
+.sidebar-section-header:hover {
+  color: var(--accent);
+}
+
+.section-header-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.section-header-label .collapse-chevron {
+  transition: transform 180ms var(--ease-out);
+}
+
+.section-header-label .collapse-chevron.collapsed {
+  transform: rotate(-90deg);
 }
 
 .sidebar-section-actions {
@@ -779,8 +855,6 @@ select:focus {
 .album-list {
   display: grid;
   gap: 4px;
-  max-height: 180px;
-  overflow: auto;
 }
 
 .camera-list,
@@ -789,8 +863,6 @@ select:focus {
 .tag-list {
   display: grid;
   gap: 4px;
-  max-height: 168px;
-  overflow: auto;
   padding-right: 2px;
 }
 
@@ -849,16 +921,29 @@ select:focus {
 }
 
 .album-sort-controls {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr)) 34px;
+  display: inline-flex;
+  align-items: center;
   gap: 2px;
   padding: 3px;
+  flex-shrink: 0;
 }
 
 .album-sort-controls button {
   min-width: 0;
-  padding: 6px 7px;
+  padding: 5px 7px;
   font-size: 0.72rem;
+}
+
+.album-filter-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.album-filter-row .library-filter {
+  flex: 1;
+  min-width: 0;
+  margin-top: 0;
 }
 
 .album-tree-item {
@@ -1111,6 +1196,7 @@ select:focus {
 
 .breadcrumbs {
   display: flex;
+  flex: 1 1 180px;
   min-width: 0;
   align-items: center;
   gap: 4px;
@@ -1131,7 +1217,11 @@ select:focus {
 
 .topbar-actions {
   display: flex;
+  flex: 1 1 520px;
+  min-width: 0;
+  flex-wrap: wrap;
   align-items: center;
+  justify-content: flex-end;
   gap: 10px;
 }
 
@@ -1382,6 +1472,69 @@ select:focus {
     gap 180ms var(--ease-out);
 }
 
+.album-overview {
+  display: grid;
+  padding: 20px 28px 36px;
+}
+
+.album-overview-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 16px;
+}
+
+.album-overview-empty {
+  display: grid;
+  min-height: 320px;
+  place-items: center;
+  align-content: center;
+  gap: 12px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.58);
+  color: var(--muted);
+  padding: 28px;
+  text-align: center;
+}
+
+.album-overview-empty strong {
+  color: #24324b;
+  font-size: 1.08rem;
+}
+
+.album-overview-empty span {
+  max-width: 420px;
+  line-height: 1.5;
+}
+
+.load-more-btn {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1.5rem;
+  margin: 0 28px 16px;
+  border: 1px solid var(--border, #d1d5db);
+  border-radius: 8px;
+  background: var(--card-bg, #fff);
+  color: var(--text-secondary, #6b7280);
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: all 140ms var(--ease-out);
+}
+
+.load-more-btn:hover {
+  border-color: var(--accent, #3b82f6);
+  color: var(--accent, #3b82f6);
+  background: var(--accent-bg, rgba(59, 130, 246, 0.06));
+}
+
+.load-more-btn--loading {
+  cursor: default;
+  opacity: 0.7;
+}
+
 .folder-card,
 .place-card,
 .photo-tile {
@@ -1506,6 +1659,94 @@ select:focus {
   border-color: rgba(45, 108, 223, 0.34);
   background: #eef4ff;
   color: #1d4ed8;
+}
+
+.album-card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card-bg, #fff);
+  padding: 0;
+  overflow: hidden;
+  text-align: left;
+  cursor: pointer;
+  color: inherit;
+  animation: tile-in 300ms var(--ease-out) both;
+  animation-delay: min(calc(var(--tile-index, 0) * 24ms), 180ms);
+  transition: border-color 140ms var(--ease-out), box-shadow 140ms var(--ease-out);
+}
+
+.album-card:hover {
+  border-color: #c7d2e4;
+  box-shadow: var(--shadow-sm);
+  transform: translateY(-1px);
+}
+
+.album-card-cover {
+  position: relative;
+  display: grid;
+  aspect-ratio: 4 / 3;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 0;
+  background: #eef3fb;
+  color: var(--accent);
+}
+
+.album-card-cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.album-card-count-badge {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  display: inline-flex;
+  min-height: 24px;
+  align-items: center;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.72);
+  color: #fff;
+  padding: 0 9px;
+  font-size: 0.74rem;
+  font-weight: 800;
+}
+
+.album-card-body {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+  padding: 9px 10px 10px;
+}
+
+.album-card-name {
+  font-size: 0.92rem;
+  color: #24324b;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.album-card-desc {
+  font-size: 0.8rem;
+  color: var(--muted, #6b7280);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.album-card-desc.empty {
+  font-style: italic;
+}
+
+.album-card-meta {
+  font-size: 0.8rem;
+  color: var(--muted, #6b7280);
+  font-weight: 700;
 }
 
 .photo-tile {
@@ -3429,9 +3670,138 @@ select:focus {
   color: var(--accent);
 }
 
+.share-password-section {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 40vh;
+  padding: 3rem 1rem;
+}
+
+.share-password-card {
+  background: var(--card-bg, #fff);
+  border: 1px solid var(--border, #ddd);
+  border-radius: 12px;
+  padding: 2.5rem 2rem;
+  max-width: 400px;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+  text-align: center;
+}
+
+.share-password-card svg {
+  color: var(--accent, #3b82f6);
+}
+
+.share-password-card strong {
+  font-size: 1.1rem;
+}
+
+.share-password-card span {
+  font-size: 0.9rem;
+  color: var(--muted, #666);
+}
+
+.share-password-form {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-top: 0.5rem;
+}
+
+.share-password-form input {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.share-password-error {
+  color: var(--danger, #ef4444);
+  font-size: 0.85rem;
+  margin: 0;
+}
+
 .mobile-only,
 .mobile-folder-sheet {
   display: none;
+}
+
+@media (max-width: 1100px) {
+  .app-shell {
+    grid-template-columns: 240px minmax(0, 1fr);
+  }
+
+  .sidebar {
+    padding: 12px;
+    gap: 8px;
+  }
+
+  .sidebar-action,
+  .admin-link {
+    justify-content: center;
+    padding: 0 12px;
+    min-height: 38px;
+    gap: 8px;
+  }
+
+  .sidebar-sticky-top {
+    gap: 8px;
+  }
+
+  .album-filter-row {
+    flex-direction: column;
+  }
+}
+
+@media (min-width: 901px) and (max-width: 1300px) {
+  .topbar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+
+  .breadcrumbs {
+    width: 100%;
+    flex: 0 1 auto;
+  }
+
+  .topbar-actions {
+    width: 100%;
+    flex: 0 1 auto;
+    flex-wrap: nowrap;
+    gap: 8px;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+  }
+
+  .topbar-actions::-webkit-scrollbar {
+    display: none;
+  }
+
+  .topbar .search-box {
+    min-width: 220px;
+    max-width: 280px;
+    flex: 1 1 220px;
+  }
+
+  .topbar .segmented-control button {
+    width: 34px;
+    min-width: 34px;
+    justify-content: center;
+    gap: 0;
+    padding: 0;
+    font-size: 0;
+  }
+
+  .topbar .rating-filter select {
+    min-width: 96px;
+    max-width: 96px;
+    font-size: 0.8rem;
+  }
 }
 
 @media (max-width: 900px) {
@@ -3585,9 +3955,13 @@ select:focus {
   }
 
   .grid-wrap,
-  .public-grid {
+  .public-grid,
+  .album-overview-grid {
     grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
     gap: 12px;
+  }
+
+  .album-overview {
     padding: 16px;
   }
 
@@ -3754,11 +4128,29 @@ select:focus {
     #101624;
 }
 
+:root[data-theme="dark"] .sidebar-sticky-top,
+:root[data-theme="dark"] .sidebar-bottom-fixed {
+  background: rgba(21, 29, 45, 0.98);
+}
+
+:root[data-theme="dark"] .sidebar-bottom-fixed {
+  border-top-color: var(--border);
+}
+
+:root[data-theme="dark"] .sidebar-scroll::-webkit-scrollbar-thumb {
+  background: rgba(160, 180, 210, 0.18);
+}
+
+:root[data-theme="dark"] .sidebar-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(160, 180, 210, 0.32);
+}
+
 :root[data-theme="dark"] .sidebar,
 :root[data-theme="dark"] .topbar,
 :root[data-theme="dark"] .admin-panel,
 :root[data-theme="dark"] .folder-card,
 :root[data-theme="dark"] .place-card,
+:root[data-theme="dark"] .album-card,
 :root[data-theme="dark"] .photo-tile,
 :root[data-theme="dark"] .table-row,
 :root[data-theme="dark"] .user-card,
@@ -3839,8 +4231,10 @@ select:focus {
 
 :root[data-theme="dark"] .status-metrics span,
 :root[data-theme="dark"] .album-status-cover,
+:root[data-theme="dark"] .album-overview-empty,
 :root[data-theme="dark"] .share-hero,
 :root[data-theme="dark"] .share-toolbar,
+:root[data-theme="dark"] .share-password-card,
 :root[data-theme="dark"] .panel-empty,
 :root[data-theme="dark"] .summary-tile {
   border-color: var(--border);
@@ -3866,6 +4260,7 @@ select:focus {
 :root[data-theme="dark"] .root-list,
 :root[data-theme="dark"] .folder-cover,
 :root[data-theme="dark"] .place-cover,
+:root[data-theme="dark"] .album-card-cover,
 :root[data-theme="dark"] .photo-tile img,
 :root[data-theme="dark"] .mobile-folder-sheet,
 :root[data-theme="dark"] .mobile-folder-button {
@@ -3877,6 +4272,8 @@ select:focus {
 :root[data-theme="dark"] .tree-item,
 :root[data-theme="dark"] .photo-tile,
 :root[data-theme="dark"] .place-card-body strong,
+:root[data-theme="dark"] .album-card-name,
+:root[data-theme="dark"] .album-overview-empty strong,
 :root[data-theme="dark"] .root-button,
 :root[data-theme="dark"] .directory-row,
 :root[data-theme="dark"] .directory-main strong {

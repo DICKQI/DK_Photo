@@ -23,24 +23,33 @@ def thumbnail_cache_path(asset: Asset, size: str) -> Path:
     return settings.thumbnail_dir / digest[:2] / f"{digest}.webp"
 
 
+def _delete_old_thumbnail(existing: Thumbnail, new_path: Path) -> None:
+    old = Path(existing.path)
+    if old != new_path and old.exists():
+        old.unlink(missing_ok=True)
+
+
 def ensure_thumbnail(session: Session, asset: Asset, size: str) -> Path:
     if size not in THUMBNAIL_SIZES:
         size = "medium"
     existing = session.exec(select(Thumbnail).where(Thumbnail.asset_id == asset.id, Thumbnail.size == size)).first()
-    if existing and Path(existing.path).exists():
-        return Path(existing.path)
+    expected_path = thumbnail_cache_path(asset, size)
+
+    if existing and existing.path == str(expected_path) and Path(existing.path).exists():
+        return expected_path
 
     library = session.get(LibraryRoot, asset.library_id)
     if not library:
         raise FileNotFoundError("Library not found")
     original_path = safe_asset_path(library.path, asset.path)
-    output_path = thumbnail_cache_path(asset, size)
+    output_path = expected_path
     output_path.parent.mkdir(parents=True, exist_ok=True)
     max_size = THUMBNAIL_SIZES[size]
 
     if asset.mime_type.startswith("video/"):
         width, height = write_video_placeholder(output_path, max_size)
         if existing:
+            _delete_old_thumbnail(existing, output_path)
             existing.path = str(output_path)
             existing.width = width
             existing.height = height
@@ -60,6 +69,7 @@ def ensure_thumbnail(session: Session, asset: Asset, size: str) -> Path:
         width, height = image.size
 
     if existing:
+        _delete_old_thumbnail(existing, output_path)
         existing.path = str(output_path)
         existing.width = width
         existing.height = height

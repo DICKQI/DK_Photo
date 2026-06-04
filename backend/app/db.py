@@ -51,6 +51,10 @@ def run_lightweight_migrations() -> None:
     if "cover_asset_id" not in album_columns:
         with engine.begin() as connection:
             connection.execute(text("ALTER TABLE photoalbum ADD COLUMN cover_asset_id INTEGER"))
+    share_columns = {column["name"] for column in inspector.get_columns("sharelink")} if inspector.has_table("sharelink") else set()
+    if "password_hash" not in share_columns:
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE sharelink ADD COLUMN password_hash VARCHAR"))
 
 
 def get_session() -> Generator[Session, None, None]:

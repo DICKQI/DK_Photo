@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import defaultdict
 from io import BytesIO
 from pathlib import PurePosixPath
 from zipfile import ZIP_DEFLATED, ZipFile
@@ -45,6 +46,7 @@ def list_assets(
     favorites_only: bool = Query(default=False),
     sort: str = Query(default="name", pattern="^(name|recent)$"),
     limit: int | None = Query(default=None, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
     media_type: str = Query(default="all", pattern="^(all|image|video)$"),
     has_location: bool = Query(default=False),
     tag: str | None = Query(default=None),
@@ -128,7 +130,25 @@ def list_assets(
         statement = statement.order_by(Asset.filename)
     if limit is not None:
         statement = statement.limit(limit)
-    return [asset_read(session, asset, favorite_ids, user_id) for asset in session.exec(statement).all()]
+    if offset:
+        statement = statement.offset(offset)
+    assets = session.exec(statement).all()
+    if not assets:
+        return []
+    library_ids = {a.library_id for a in assets}
+    folder_ids = {a.folder_id for a in assets}
+    asset_ids = [a.id for a in assets if a.id is not None]
+    libraries = {lib.id: lib for lib in session.exec(select(LibraryRoot).where(LibraryRoot.id.in_(library_ids))).all()} if library_ids else {}
+    folders = {f.id: f for f in session.exec(select(Folder).where(Folder.id.in_(folder_ids))).all()} if folder_ids else {}
+    metadata_map: dict[int, AssetMetadata] = {}
+    if user_id and asset_ids:
+        for m in session.exec(select(AssetMetadata).where(AssetMetadata.user_id == user_id, AssetMetadata.asset_id.in_(asset_ids))).all():
+            metadata_map[m.asset_id] = m
+    tag_map: dict[int, list[str]] = defaultdict(list)
+    if user_id and asset_ids:
+        for t in session.exec(select(AssetTag).where(AssetTag.user_id == user_id, AssetTag.asset_id.in_(asset_ids)).order_by(AssetTag.name)).all():
+            tag_map[t.asset_id].append(t.name)
+    return [asset_read(session, asset, favorite_ids, user_id, libraries, folders, metadata_map, tag_map) for asset in assets]
 
 
 @router.get("/tags", response_model=list[AssetTagRead])
@@ -240,43 +260,74 @@ def list_asset_places(
     current_user: CurrentUser,
     search: str | None = Query(default=None),
 ) -> list[AssetPlaceRead]:
-    statement = select(Asset).where(Asset.latitude.is_not(None), Asset.longitude.is_not(None))
+    allowed_ids = accessible_library_ids(session, current_user)
     query = search.strip() if search else ""
-    if query:
-        statement = statement.where(asset_search_filter(query, current_user.id or 0))
-    allowed_library_ids = accessible_library_ids(session, current_user)
-    if allowed_library_ids is not None:
-        if not allowed_library_ids:
-            return []
-        statement = statement.where(Asset.library_id.in_(allowed_library_ids))
 
-    places: dict[str, AssetPlaceRead] = {}
-    for asset in session.exec(statement).all():
-        place_key = place_key_for_coordinates(asset.latitude, asset.longitude)
+    round_lat = func.round(Asset.latitude, PLACE_PRECISION)
+    round_lon = func.round(Asset.longitude, PLACE_PRECISION)
+
+    aggregate = (
+        select(
+            round_lat.label("lat"),
+            round_lon.label("lon"),
+            func.count(Asset.id).label("cnt"),
+            func.max(func.coalesce(Asset.captured_at, Asset.updated_at, Asset.created_at)).label("latest"),
+        )
+        .where(Asset.latitude.is_not(None), Asset.longitude.is_not(None))
+        .group_by(round_lat, round_lon)
+    )
+    if query:
+        aggregate = aggregate.where(asset_search_filter(query, current_user.id or 0))
+    if allowed_ids is not None:
+        if not allowed_ids:
+            return []
+        aggregate = aggregate.where(Asset.library_id.in_(allowed_ids))
+
+    rows = session.exec(aggregate).all()
+    if not rows:
+        return []
+
+    places: list[AssetPlaceRead] = []
+    for lat, lon, cnt, latest in rows:
+        if lat is None or lon is None:
+            continue
+        place_key = place_key_for_coordinates(float(lat), float(lon))
         if not place_key:
             continue
-        latitude, longitude = place_key_parts(place_key)
-        latest_at = asset_place_datetime(asset)
-        existing = places.get(place_key)
-        if existing:
-            existing.asset_count += 1
-            if latest_at and (not existing.latest_at or latest_at >= existing.latest_at):
-                existing.latest_at = latest_at
-                existing.cover_asset_id = asset.id
-        else:
-            places[place_key] = AssetPlaceRead(
-                place_key=place_key,
-                label=place_label(latitude, longitude),
-                latitude=latitude,
-                longitude=longitude,
-                asset_count=1,
-                cover_asset_id=asset.id,
-                latest_at=latest_at,
+        places.append(AssetPlaceRead(
+            place_key=place_key,
+            label=place_label(float(lat), float(lon)),
+            latitude=float(lat),
+            longitude=float(lon),
+            asset_count=cnt,
+            cover_asset_id=None,
+            latest_at=latest,
+        ))
+
+    places.sort(key=lambda p: (-p.asset_count, -(p.latest_at.timestamp() if p.latest_at else 0), p.label))
+
+    top_places = places[:20]
+    for place in top_places:
+        cover_stmt = (
+            select(Asset.id)
+            .where(
+                Asset.latitude.is_not(None), Asset.longitude.is_not(None),
+                func.round(Asset.latitude, PLACE_PRECISION) == place.latitude,
+                func.round(Asset.longitude, PLACE_PRECISION) == place.longitude,
             )
-    return sorted(
-        places.values(),
-        key=lambda place: (-place.asset_count, -(place.latest_at.timestamp() if place.latest_at else 0), place.label),
-    )
+        )
+        if query:
+            cover_stmt = cover_stmt.where(asset_search_filter(query, current_user.id or 0))
+        if allowed_ids is not None:
+            cover_stmt = cover_stmt.where(Asset.library_id.in_(allowed_ids))
+        cover = session.exec(
+            cover_stmt.order_by(func.coalesce(Asset.captured_at, Asset.updated_at, Asset.created_at).desc())
+            .limit(1)
+        ).first()
+        if cover is not None:
+            place.cover_asset_id = cover
+
+    return places
 
 
 @router.post("/bulk-tags", response_model=list[AssetRead])
@@ -685,10 +736,13 @@ def safe_archive_name(asset: Asset) -> str:
     return "/".join(parts) or asset.filename or f"asset-{asset.id}"
 
 
-def asset_read(session: SessionDep, asset: Asset, favorite_ids: set[int], tag_user_id: int | None = None) -> AssetRead:
-    library = session.get(LibraryRoot, asset.library_id)
-    folder = session.get(Folder, asset.folder_id)
-    metadata = asset_metadata(session, asset.id or 0, tag_user_id)
+def asset_read(session: SessionDep, asset: Asset, favorite_ids: set[int], tag_user_id: int | None = None,
+               libraries: dict[int, LibraryRoot] | None = None, folders: dict[int, Folder] | None = None,
+               metadata_map: dict[int, AssetMetadata] | None = None, tag_map: dict[int, list[str]] | None = None) -> AssetRead:
+    library = libraries.get(asset.library_id) if libraries else session.get(LibraryRoot, asset.library_id)
+    folder = folders.get(asset.folder_id) if folders else session.get(Folder, asset.folder_id)
+    metadata = metadata_map.get(asset.id or 0) if metadata_map else (asset_metadata(session, asset.id or 0, tag_user_id) if tag_user_id else None)
+    tags = tag_map.get(asset.id or 0, []) if tag_map else (asset_tag_names(session, asset.id or 0, tag_user_id) if tag_user_id else [])
     return AssetRead(
         id=asset.id or 0,
         library_id=asset.library_id,
@@ -713,7 +767,7 @@ def asset_read(session: SessionDep, asset: Asset, favorite_ids: set[int], tag_us
         focal_length=asset.focal_length,
         latitude=asset.latitude,
         longitude=asset.longitude,
-        tags=asset_tag_names(session, asset.id or 0, tag_user_id),
+        tags=tags,
         description=metadata.description if metadata else "",
         rating=metadata.rating if metadata else 0,
         updated_at=asset.updated_at,

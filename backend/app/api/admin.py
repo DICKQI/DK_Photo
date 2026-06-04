@@ -365,3 +365,35 @@ def update_user_permissions(
 def list_shares(session: SessionDep, _: AdminUser) -> list[ShareRead]:
     shares = session.exec(select(ShareLink).order_by(ShareLink.created_at.desc())).all()
     return [share_read(session, share) for share in shares]
+
+
+@router.post("/maintenance/cleanup-thumbnails")
+def cleanup_thumbnails(session: SessionDep, _: AdminUser) -> dict:
+    db_paths = set(
+        session.exec(select(Thumbnail.path)).all()
+    )
+    thumbnail_root = settings.thumbnail_dir
+    if not thumbnail_root.exists():
+        return {"deleted_files": 0, "freed_bytes": 0, "deleted_dirs": 0}
+
+    deleted_files = 0
+    freed_bytes = 0
+    all_dirs: set[Path] = set()
+
+    for path in thumbnail_root.rglob("*.webp"):
+        all_dirs.add(path.parent)
+        if str(path) not in db_paths:
+            freed_bytes += path.stat().st_size
+            path.unlink()
+            deleted_files += 1
+
+    deleted_dirs = 0
+    for directory in sorted(all_dirs, key=lambda p: len(p.parents), reverse=True):
+        try:
+            if not any(directory.iterdir()):
+                directory.rmdir()
+                deleted_dirs += 1
+        except OSError:
+            pass
+
+    return {"deleted_files": deleted_files, "freed_bytes": freed_bytes, "deleted_dirs": deleted_dirs}

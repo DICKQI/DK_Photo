@@ -260,6 +260,7 @@ class ShareCreate(BaseModel):
     folder_id: Optional[int] = None
     asset_ids: Optional[list[int]] = None
     expires_in_days: Optional[int] = Field(default=7, ge=0, le=365)
+    password: Optional[str] = Field(default=None, max_length=128)
 
 
 class ShareRead(BaseModel):
@@ -279,6 +280,7 @@ class ShareRead(BaseModel):
 class ShareUpdate(BaseModel):
     title: Optional[str] = Field(default=None, max_length=160)
     expires_in_days: Optional[int] = Field(default=None, ge=0, le=365)
+    password: Optional[str] = Field(default=None, max_length=128)
 
 
 class PublicShareRead(BaseModel):
@@ -288,3 +290,8 @@ class PublicShareRead(BaseModel):
     folder_id: Optional[int]
     asset_ids: Optional[list[int]] = None
     expires_at: Optional[datetime]
+    has_password: bool = False
+
+
+class ShareVerifyRequest(BaseModel):
+    password: str

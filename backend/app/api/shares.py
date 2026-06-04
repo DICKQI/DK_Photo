@@ -2,22 +2,48 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 from secrets import token_urlsafe
+from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query, status
+import jwt
+from fastapi import APIRouter, HTTPException, Query, Request, Response, status
 from fastapi.responses import FileResponse
 from sqlalchemy import func
 from sqlmodel import select
 
+from app.config import settings
 from app.deps import CurrentUser, SessionDep
 from app.api.assets import stream_asset_archive
 from app.models import Asset, Folder, LibraryRoot, ShareAsset, ShareLink
-from app.schemas import AssetRead, PublicShareRead, ShareCreate, ShareRead, ShareUpdate
+from app.schemas import AssetRead, PublicShareRead, ShareCreate, ShareRead, ShareUpdate, ShareVerifyRequest
+from app.security import hash_password, verify_password
 from app.services.paths import safe_asset_path
 from app.services.permissions import require_asset_access, require_folder_access
 from app.services.thumbnails import ensure_thumbnail
 
 
 router = APIRouter(tags=["shares"])
+SHARE_VERIFY_ALGORITHM = "HS256"
+
+
+def create_share_verify_token(share_token: str) -> str:
+    expires_at = datetime.utcnow() + timedelta(hours=1)
+    payload: dict[str, Any] = {"sub": share_token, "type": "share_verify", "exp": expires_at}
+    return jwt.encode(payload, settings.secret_key, algorithm=SHARE_VERIFY_ALGORITHM)
+
+
+def require_share_access(request: Request, share: ShareLink) -> None:
+    if not share.password_hash:
+        return
+    cookie_name = f"dk_photo_share_{share.token}"
+    token = request.cookies.get(cookie_name)
+    if not token:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Share password required")
+    try:
+        payload = jwt.decode(token, settings.secret_key, algorithms=[SHARE_VERIFY_ALGORITHM])
+    except Exception:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired share verification")
+    if payload.get("sub") != share.token or payload.get("type") != "share_verify":
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid share verification")
 
 
 @router.post("/api/shares", response_model=ShareRead)
@@ -52,10 +78,12 @@ def create_share(payload: ShareCreate, session: SessionDep, current_user: Curren
         title = payload.title or db_assets[0].filename if db_assets else "Shared photos"
     else:
         title = payload.title or (asset.filename if asset else folder.name if folder else "Shared photos")
+    password_hash = hash_password(payload.password) if payload.password else None
     share = ShareLink(
         token=token_urlsafe(24),
         creator_id=current_user.id or 0,
         title=title,
+        password_hash=password_hash,
         asset_id=payload.asset_id,
         folder_id=payload.folder_id,
         expires_at=expires_at,
@@ -97,6 +125,11 @@ def update_share(share_id: int, payload: ShareUpdate, session: SessionDep, curre
             share.expires_at = datetime.utcnow() + timedelta(days=payload.expires_in_days)
         else:
             share.expires_at = None
+    if payload.password is not None:
+        if payload.password:
+            share.password_hash = hash_password(payload.password)
+        else:
+            share.password_hash = None
     session.add(share)
     session.commit()
     session.refresh(share)
@@ -141,18 +174,40 @@ def get_public_share(token: str, session: SessionDep) -> PublicShareRead:
         folder_id=share.folder_id,
         asset_ids=asset_ids,
         expires_at=share.expires_at,
+        has_password=bool(share.password_hash),
     )
 
 
-@router.get("/api/public/shares/{token}/assets", response_model=list[AssetRead])
-def get_public_share_assets(token: str, session: SessionDep) -> list[Asset]:
+@router.post("/api/public/shares/{token}/verify")
+def verify_share_password(token: str, payload: ShareVerifyRequest, session: SessionDep, response: Response) -> dict:
     share = get_active_share(session, token)
+    if not share.password_hash:
+        return {"verified": True, "access_token": None}
+    if not verify_password(payload.password, share.password_hash):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid share password")
+    verify_token = create_share_verify_token(share.token)
+    response.set_cookie(
+        f"dk_photo_share_{share.token}",
+        verify_token,
+        httponly=True,
+        samesite="lax",
+        secure=False,
+        max_age=3600,
+    )
+    return {"verified": True, "access_token": verify_token}
+
+
+@router.get("/api/public/shares/{token}/assets", response_model=list[AssetRead])
+def get_public_share_assets(token: str, request: Request, session: SessionDep) -> list[Asset]:
+    share = get_active_share(session, token)
+    require_share_access(request, share)
     return public_share_assets(session, share)
 
 
 @router.get("/api/public/shares/{token}/download")
-def download_public_share(token: str, session: SessionDep):
+def download_public_share(token: str, request: Request, session: SessionDep):
     share = get_active_share(session, token)
+    require_share_access(request, share)
     assets = public_share_assets(session, share)
     if not assets:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No assets in share")
@@ -174,8 +229,9 @@ def public_share_assets(session: SessionDep, share: ShareLink) -> list[Asset]:
 
 
 @router.get("/api/public/shares/{token}/assets/{asset_id}/original")
-def get_public_original(token: str, asset_id: int, session: SessionDep) -> FileResponse:
+def get_public_original(token: str, asset_id: int, request: Request, session: SessionDep) -> FileResponse:
     share = get_active_share(session, token)
+    require_share_access(request, share)
     asset = session.get(Asset, asset_id)
     if not asset or not _share_contains_asset(session, share, asset):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found in share")
@@ -190,10 +246,12 @@ def get_public_original(token: str, asset_id: int, session: SessionDep) -> FileR
 def get_public_thumbnail(
     token: str,
     asset_id: int,
+    request: Request,
     session: SessionDep,
     size: str = Query(default="medium", pattern="^(small|medium|large)$"),
 ) -> FileResponse:
     share = get_active_share(session, token)
+    require_share_access(request, share)
     asset = session.get(Asset, asset_id)
     if not asset or not _share_contains_asset(session, share, asset):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found in share")

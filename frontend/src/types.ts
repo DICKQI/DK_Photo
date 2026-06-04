@@ -136,6 +136,7 @@ export interface PublicShare {
   folder_id: number | null;
   asset_ids: number[] | null;
   expires_at: string | null;
+  has_password: boolean;
 }
 
 export interface LibraryPermission {

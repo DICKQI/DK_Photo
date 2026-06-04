@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 
-from sqlmodel import Field, SQLModel, UniqueConstraint
+from sqlmodel import Field, Index, SQLModel, UniqueConstraint
 
 
 def utc_now() -> datetime:
@@ -53,6 +53,11 @@ class Folder(SQLModel, table=True):
 
 
 class Asset(SQLModel, table=True):
+    __table_args__ = (
+        Index("ix_asset_library_folder_mime", "library_id", "folder_id", "mime_type"),
+        Index("ix_asset_captured_at", "captured_at"),
+    )
+
     id: Optional[int] = Field(default=None, primary_key=True)
     library_id: int = Field(foreign_key="libraryroot.id", index=True)
     folder_id: int = Field(foreign_key="folder.id", index=True)
@@ -141,6 +146,7 @@ class ShareLink(SQLModel, table=True):
     token: str = Field(index=True, unique=True)
     creator_id: int = Field(foreign_key="user.id", index=True)
     title: str
+    password_hash: Optional[str] = None
     asset_id: Optional[int] = Field(default=None, foreign_key="asset.id", index=True)
     folder_id: Optional[int] = Field(default=None, foreign_key="folder.id", index=True)
     expires_at: Optional[datetime] = Field(default=None, index=True)
