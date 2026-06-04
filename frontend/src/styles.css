@@ -889,6 +889,41 @@ select:focus {
   transform: rotate(-90deg);
 }
 
+.sidebar-collapse-panel {
+  display: grid;
+  grid-template-rows: 1fr;
+  overflow: hidden;
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.sidebar-collapse-panel-inner {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.sidebar-collapse-enter-active,
+.sidebar-collapse-leave-active {
+  transition:
+    grid-template-rows 190ms var(--ease-out),
+    opacity 160ms var(--ease-out),
+    transform 190ms var(--ease-out);
+}
+
+.sidebar-collapse-enter-from,
+.sidebar-collapse-leave-to {
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transform: translateY(-4px);
+}
+
+.sidebar-collapse-enter-to,
+.sidebar-collapse-leave-from {
+  grid-template-rows: 1fr;
+  opacity: 1;
+  transform: translateY(0);
+}
+
 .sidebar-section-actions {
   display: inline-flex;
   align-items: center;

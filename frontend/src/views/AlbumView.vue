@@ -84,62 +84,66 @@
           </button>
         </div>
       </div>
-      <div v-show="!collapsedSections['albums']">
-        <div v-if="photoAlbums.length" class="album-filter-row">
-          <label class="library-filter album-filter">
-            <Search :size="16" />
-            <input v-model="albumFilter" :placeholder="t('album.filterAlbums')" />
-            <button v-if="albumFilter" class="search-clear" type="button" :title="t('album.clearAlbumFilter')" @click="albumFilter = ''">
-              <X :size="14" />
-            </button>
-          </label>
-          <div class="album-sort-controls segmented-control" :aria-label="t('album.sortAlbums')">
-            <button :class="{ active: albumSortMode === 'updated' }" :title="t('album.sortAlbumsByUpdated')" @click="setAlbumSortMode('updated')">
-              {{ t('common.sortDate') }}
-            </button>
-            <button :class="{ active: albumSortMode === 'name' }" :title="t('album.sortAlbumsByName')" @click="setAlbumSortMode('name')">
-              {{ t('common.sortName') }}
-            </button>
-            <button :class="{ active: albumSortMode === 'count' }" :title="t('album.sortAlbumsByCount')" @click="setAlbumSortMode('count')">
-              {{ t('common.sortSize') }}
-            </button>
-            <button :class="{ active: albumSortDirection === 'asc' }" :title="albumSortDirectionTitle" @click="toggleAlbumSortDirection">
-              <ArrowUpAZ v-if="albumSortDirection === 'asc'" :size="14" />
-              <ArrowDownAZ v-else :size="14" />
-            </button>
+      <Transition name="sidebar-collapse">
+        <div v-show="!collapsedSections['albums']" class="sidebar-collapse-panel">
+          <div class="sidebar-collapse-panel-inner">
+            <div v-if="photoAlbums.length" class="album-filter-row">
+              <label class="library-filter album-filter">
+                <Search :size="16" />
+                <input v-model="albumFilter" :placeholder="t('album.filterAlbums')" />
+                <button v-if="albumFilter" class="search-clear" type="button" :title="t('album.clearAlbumFilter')" @click="albumFilter = ''">
+                  <X :size="14" />
+                </button>
+              </label>
+              <div class="album-sort-controls segmented-control" :aria-label="t('album.sortAlbums')">
+                <button :class="{ active: albumSortMode === 'updated' }" :title="t('album.sortAlbumsByUpdated')" @click="setAlbumSortMode('updated')">
+                  {{ t('common.sortDate') }}
+                </button>
+                <button :class="{ active: albumSortMode === 'name' }" :title="t('album.sortAlbumsByName')" @click="setAlbumSortMode('name')">
+                  {{ t('common.sortName') }}
+                </button>
+                <button :class="{ active: albumSortMode === 'count' }" :title="t('album.sortAlbumsByCount')" @click="setAlbumSortMode('count')">
+                  {{ t('common.sortSize') }}
+                </button>
+                <button :class="{ active: albumSortDirection === 'asc' }" :title="albumSortDirectionTitle" @click="toggleAlbumSortDirection">
+                  <ArrowUpAZ v-if="albumSortDirection === 'asc'" :size="14" />
+                  <ArrowDownAZ v-else :size="14" />
+                </button>
+              </div>
+            </div>
+            <div class="album-list">
+              <div v-if="albumsLoading" class="shares-loading">
+                <LoaderCircle class="spin" :size="18" />
+                <span>{{ t('album.loadingAlbums') }}</span>
+              </div>
+              <div v-else-if="!photoAlbums.length" class="shares-empty">
+                <span>{{ t('album.noAlbums') }}</span>
+                <small>{{ t('album.noAlbumsHint') }}</small>
+              </div>
+              <div v-else-if="!filteredPhotoAlbums.length" class="shares-empty">
+                <span>{{ t('album.noMatchingAlbums') }}</span>
+                <small>{{ t('album.noAlbumsMatch', { query: albumFilter.trim() }) }}</small>
+              </div>
+              <template v-else>
+                <button
+                  v-for="album in filteredPhotoAlbums"
+                  :key="album.id"
+                  class="tree-item album-tree-item"
+                  :class="{ active: currentAlbum?.id === album.id }"
+                  @click="openAlbumView(album)"
+                >
+                  <span class="album-list-cover">
+                    <img v-if="album.cover_asset_id" :src="thumbnailUrl(album.cover_asset_id, 'small')" alt="" loading="lazy" />
+                    <Images v-else :size="17" />
+                  </span>
+                  <span>{{ album.name }}</span>
+                  <small>{{ album.asset_count }}</small>
+                </button>
+              </template>
+            </div>
           </div>
         </div>
-        <div class="album-list">
-          <div v-if="albumsLoading" class="shares-loading">
-            <LoaderCircle class="spin" :size="18" />
-            <span>{{ t('album.loadingAlbums') }}</span>
-          </div>
-          <div v-else-if="!photoAlbums.length" class="shares-empty">
-            <span>{{ t('album.noAlbums') }}</span>
-            <small>{{ t('album.noAlbumsHint') }}</small>
-          </div>
-          <div v-else-if="!filteredPhotoAlbums.length" class="shares-empty">
-            <span>{{ t('album.noMatchingAlbums') }}</span>
-            <small>{{ t('album.noAlbumsMatch', { query: albumFilter.trim() }) }}</small>
-          </div>
-          <template v-else>
-            <button
-              v-for="album in filteredPhotoAlbums"
-              :key="album.id"
-              class="tree-item album-tree-item"
-              :class="{ active: currentAlbum?.id === album.id }"
-              @click="openAlbumView(album)"
-            >
-              <span class="album-list-cover">
-                <img v-if="album.cover_asset_id" :src="thumbnailUrl(album.cover_asset_id, 'small')" alt="" loading="lazy" />
-                <Images v-else :size="17" />
-              </span>
-              <span>{{ album.name }}</span>
-              <small>{{ album.asset_count }}</small>
-            </button>
-          </template>
-        </div>
-      </div>
+      </Transition>
 
       <div class="sidebar-section-header" @click="toggleSection('cameras')">
         <span class="section-header-label">
@@ -150,29 +154,33 @@
           <RefreshCw :size="14" />
         </button>
       </div>
-      <div v-show="!collapsedSections['cameras']" class="camera-list">
-        <div v-if="camerasLoading" class="shares-loading">
-          <LoaderCircle class="spin" :size="18" />
-          <span>{{ t('album.loadingCameras') }}</span>
+      <Transition name="sidebar-collapse">
+        <div v-show="!collapsedSections['cameras']" class="sidebar-collapse-panel">
+          <div class="sidebar-collapse-panel-inner camera-list">
+            <div v-if="camerasLoading" class="shares-loading">
+              <LoaderCircle class="spin" :size="18" />
+              <span>{{ t('album.loadingCameras') }}</span>
+            </div>
+            <div v-else-if="!filteredAssetCameras.length" class="shares-empty">
+              <span>{{ t('album.noCameras') }}</span>
+              <small>{{ t('album.noCamerasHint') }}</small>
+            </div>
+            <template v-else>
+              <button
+                v-for="camera in filteredAssetCameras"
+                :key="camera.camera_key"
+                class="tree-item camera-tree-item"
+                :class="{ active: currentCamera?.camera_key === camera.camera_key }"
+                @click="openCameraView(camera)"
+              >
+                <Camera :size="17" />
+                <span>{{ camera.label }}</span>
+                <small>{{ camera.asset_count }}</small>
+              </button>
+            </template>
+          </div>
         </div>
-        <div v-else-if="!filteredAssetCameras.length" class="shares-empty">
-          <span>{{ t('album.noCameras') }}</span>
-          <small>{{ t('album.noCamerasHint') }}</small>
-        </div>
-        <template v-else>
-          <button
-            v-for="camera in filteredAssetCameras"
-            :key="camera.camera_key"
-            class="tree-item camera-tree-item"
-            :class="{ active: currentCamera?.camera_key === camera.camera_key }"
-            @click="openCameraView(camera)"
-          >
-            <Camera :size="17" />
-            <span>{{ camera.label }}</span>
-            <small>{{ camera.asset_count }}</small>
-          </button>
-        </template>
-      </div>
+      </Transition>
 
       <div class="sidebar-section-header" @click="toggleSection('lenses')">
         <span class="section-header-label">
@@ -183,29 +191,33 @@
           <RefreshCw :size="14" />
         </button>
       </div>
-      <div v-show="!collapsedSections['lenses']" class="lens-list">
-        <div v-if="lensesLoading" class="shares-loading">
-          <LoaderCircle class="spin" :size="18" />
-          <span>{{ t('album.loadingLenses') }}</span>
+      <Transition name="sidebar-collapse">
+        <div v-show="!collapsedSections['lenses']" class="sidebar-collapse-panel">
+          <div class="sidebar-collapse-panel-inner lens-list">
+            <div v-if="lensesLoading" class="shares-loading">
+              <LoaderCircle class="spin" :size="18" />
+              <span>{{ t('album.loadingLenses') }}</span>
+            </div>
+            <div v-else-if="!filteredAssetLenses.length" class="shares-empty">
+              <span>{{ t('album.noLenses') }}</span>
+              <small>{{ t('album.noLensesHint') }}</small>
+            </div>
+            <template v-else>
+              <button
+                v-for="lens in filteredAssetLenses"
+                :key="lens.lens_key"
+                class="tree-item lens-tree-item"
+                :class="{ active: currentLens?.lens_key === lens.lens_key }"
+                @click="openLensView(lens)"
+              >
+                <Aperture :size="17" />
+                <span>{{ lens.label }}</span>
+                <small>{{ lens.asset_count }}</small>
+              </button>
+            </template>
+          </div>
         </div>
-        <div v-else-if="!filteredAssetLenses.length" class="shares-empty">
-          <span>{{ t('album.noLenses') }}</span>
-          <small>{{ t('album.noLensesHint') }}</small>
-        </div>
-        <template v-else>
-          <button
-            v-for="lens in filteredAssetLenses"
-            :key="lens.lens_key"
-            class="tree-item lens-tree-item"
-            :class="{ active: currentLens?.lens_key === lens.lens_key }"
-            @click="openLensView(lens)"
-          >
-            <Aperture :size="17" />
-            <span>{{ lens.label }}</span>
-            <small>{{ lens.asset_count }}</small>
-          </button>
-        </template>
-      </div>
+      </Transition>
 
       <div class="sidebar-section-header" @click="toggleSection('ratings')">
         <span class="section-header-label">
@@ -216,29 +228,33 @@
           <RefreshCw :size="14" />
         </button>
       </div>
-      <div v-show="!collapsedSections['ratings']" class="rating-list">
-        <div v-if="ratingsLoading" class="shares-loading">
-          <LoaderCircle class="spin" :size="18" />
-          <span>{{ t('album.loadingRatings') }}</span>
+      <Transition name="sidebar-collapse">
+        <div v-show="!collapsedSections['ratings']" class="sidebar-collapse-panel">
+          <div class="sidebar-collapse-panel-inner rating-list">
+            <div v-if="ratingsLoading" class="shares-loading">
+              <LoaderCircle class="spin" :size="18" />
+              <span>{{ t('album.loadingRatings') }}</span>
+            </div>
+            <div v-else-if="!filteredAssetRatings.length" class="shares-empty">
+              <span>{{ t('album.noRatings') }}</span>
+              <small>{{ t('album.noRatingsHint') }}</small>
+            </div>
+            <template v-else>
+              <button
+                v-for="rating in filteredAssetRatings"
+                :key="rating.rating"
+                class="tree-item rating-tree-item"
+                :class="{ active: currentRating === rating.rating }"
+                @click="openRatingView(rating.rating)"
+              >
+                <Star :size="17" fill="currentColor" />
+                <span>{{ t('album.ratingAtLeast', { rating: rating.rating }) }}</span>
+                <small>{{ rating.asset_count }}</small>
+              </button>
+            </template>
+          </div>
         </div>
-        <div v-else-if="!filteredAssetRatings.length" class="shares-empty">
-          <span>{{ t('album.noRatings') }}</span>
-          <small>{{ t('album.noRatingsHint') }}</small>
-        </div>
-        <template v-else>
-          <button
-            v-for="rating in filteredAssetRatings"
-            :key="rating.rating"
-            class="tree-item rating-tree-item"
-            :class="{ active: currentRating === rating.rating }"
-            @click="openRatingView(rating.rating)"
-          >
-            <Star :size="17" fill="currentColor" />
-            <span>{{ t('album.ratingAtLeast', { rating: rating.rating }) }}</span>
-            <small>{{ rating.asset_count }}</small>
-          </button>
-        </template>
-      </div>
+      </Transition>
 
       <div class="sidebar-section-header" @click="toggleSection('tags')">
         <span class="section-header-label">
@@ -249,51 +265,55 @@
           <RefreshCw :size="14" />
         </button>
       </div>
-      <div v-show="!collapsedSections['tags']">
-        <label v-if="assetTags.length" class="library-filter tag-filter">
-          <Search :size="16" />
-          <input v-model="tagFilter" :placeholder="t('album.searchTags')" />
-          <button v-if="tagFilter" class="search-clear" type="button" :title="t('common.clearSearch')" @click="tagFilter = ''">
-            <X :size="14" />
-          </button>
-        </label>
-        <div class="tag-list">
-          <div v-if="tagsLoading" class="shares-loading">
-            <LoaderCircle class="spin" :size="18" />
-            <span>{{ t('album.loadingTags') }}</span>
-          </div>
-          <div v-else-if="!assetTags.length" class="shares-empty">
-            <span>{{ t('album.noTags') }}</span>
-            <small>{{ t('album.noTagsHint') }}</small>
-          </div>
-          <div v-else-if="!filteredAssetTags.length" class="shares-empty">
-            <span>{{ t('album.noMatchingTags') }}</span>
-            <small>{{ t('album.noTagsMatch', { query: tagFilter.trim() }) }}</small>
-          </div>
-          <template v-else>
-            <div
-              v-for="tag in filteredAssetTags"
-              :key="tag.name"
-              class="tag-tree-row"
-              :class="{ active: currentTag === tag.name }"
-            >
-              <button class="tree-item tag-tree-item" @click="openTagView(tag.name)">
-                <Tag :size="17" />
-                <span>{{ tag.name }}</span>
-                <small>{{ tag.asset_count }}</small>
+      <Transition name="sidebar-collapse">
+        <div v-show="!collapsedSections['tags']" class="sidebar-collapse-panel">
+          <div class="sidebar-collapse-panel-inner">
+            <label v-if="assetTags.length" class="library-filter tag-filter">
+              <Search :size="16" />
+              <input v-model="tagFilter" :placeholder="t('album.searchTags')" />
+              <button v-if="tagFilter" class="search-clear" type="button" :title="t('common.clearSearch')" @click="tagFilter = ''">
+                <X :size="14" />
               </button>
-              <div class="tag-row-actions">
-                <button type="button" :title="t('album.renameTag')" @click="openRenameTag(tag)">
-                  <Pencil :size="14" />
-                </button>
-                <button type="button" :title="t('album.deleteTag')" @click="openDeleteTag(tag)">
-                  <Trash2 :size="14" />
-                </button>
+            </label>
+            <div class="tag-list">
+              <div v-if="tagsLoading" class="shares-loading">
+                <LoaderCircle class="spin" :size="18" />
+                <span>{{ t('album.loadingTags') }}</span>
               </div>
+              <div v-else-if="!assetTags.length" class="shares-empty">
+                <span>{{ t('album.noTags') }}</span>
+                <small>{{ t('album.noTagsHint') }}</small>
+              </div>
+              <div v-else-if="!filteredAssetTags.length" class="shares-empty">
+                <span>{{ t('album.noMatchingTags') }}</span>
+                <small>{{ t('album.noTagsMatch', { query: tagFilter.trim() }) }}</small>
+              </div>
+              <template v-else>
+                <div
+                  v-for="tag in filteredAssetTags"
+                  :key="tag.name"
+                  class="tag-tree-row"
+                  :class="{ active: currentTag === tag.name }"
+                >
+                  <button class="tree-item tag-tree-item" @click="openTagView(tag.name)">
+                    <Tag :size="17" />
+                    <span>{{ tag.name }}</span>
+                    <small>{{ tag.asset_count }}</small>
+                  </button>
+                  <div class="tag-row-actions">
+                    <button type="button" :title="t('album.renameTag')" @click="openRenameTag(tag)">
+                      <Pencil :size="14" />
+                    </button>
+                    <button type="button" :title="t('album.deleteTag')" @click="openDeleteTag(tag)">
+                      <Trash2 :size="14" />
+                    </button>
+                  </div>
+                </div>
+              </template>
             </div>
-          </template>
+          </div>
         </div>
-      </div>
+      </Transition>
 
       <button class="sidebar-action" :class="{ active: showSharesPanel }" @click="toggleSharesPanel">
         <Share2 :size="18" />
