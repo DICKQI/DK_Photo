@@ -125,7 +125,7 @@
                 <Pencil :size="17" />
                 {{ t('common.edit') }}
               </button>
-              <button class="secondary-button" :disabled="isBusy(scanKey(library.id))" @click="scan(library.id)">
+              <button class="primary-button" :disabled="isBusy(scanKey(library.id))" @click="scan(library.id)">
                 <LoaderCircle v-if="isBusy(scanKey(library.id))" class="spin" :size="17" />
                 <ScanLine v-else :size="17" />
                 {{ isBusy(scanKey(library.id)) ? t('admin.queued') : t('admin.scan') }}
@@ -140,37 +140,19 @@
         </div>
       </article>
 
-      <section class="admin-user-workspace wide-panel">
-        <article class="admin-panel create-user-panel">
-          <header>
-            <div>
-              <h2>{{ t('admin.createUserTitle') }}</h2>
-              <p class="panel-note">{{ t('admin.noUsersHint') }}</p>
-            </div>
-          </header>
-          <form class="stack-form create-user-form" @submit.prevent="createUser">
-            <input v-model="newUser.email" type="email" :placeholder="t('login.email')" required />
-            <input v-model="newUser.displayName" :placeholder="t('admin.displayName')" required />
-            <input v-model="newUser.password" type="password" :placeholder="t('admin.passwordPlaceholder')" required />
-            <select v-model="newUser.role" class="select-control">
-              <option value="member">{{ t('common.member') }}</option>
-              <option value="admin">{{ t('common.admin') }}</option>
-            </select>
-            <button class="primary-button" type="submit" :disabled="isBusy(createUserKey)">
-              <LoaderCircle v-if="isBusy(createUserKey)" class="spin" :size="17" />
-              <UserPlus v-else :size="17" />
-              {{ isBusy(createUserKey) ? t('common.creating') : t('admin.createUser') }}
-            </button>
-          </form>
-        </article>
-
-        <article class="admin-panel users-panel">
+      <article class="admin-panel users-panel wide-panel">
           <header>
             <div>
               <h2>{{ t('admin.usersTitle') }}</h2>
               <p class="panel-note">{{ t('admin.usersNote') }}</p>
             </div>
-            <small class="status-pill neutral">{{ formatCount(users.length, 'account') }}</small>
+            <div class="panel-header-actions">
+              <small class="status-pill neutral">{{ formatCount(users.length, 'account') }}</small>
+              <button class="primary-button panel-header-action" type="button" @click="showCreateUserModal = true">
+                <UserPlus :size="17" />
+                {{ t('admin.createUser') }}
+              </button>
+            </div>
           </header>
           <div v-if="users.length" class="user-toolbar">
             <label class="search-box user-search">
@@ -267,8 +249,7 @@
               </div>
             </div>
           </div>
-        </article>
-      </section>
+      </article>
 
       <div class="admin-grid-row admin-monitor-grid">
       <article class="admin-panel monitor-panel">
@@ -300,7 +281,7 @@
             <span>{{ t('admin.noMatchingScanJobsHint') }}</span>
           </div>
           <div v-else class="table-list scrollable">
-            <div v-for="job in filteredJobs" :key="job.id" class="table-row">
+            <div v-for="job in filteredJobs" :key="job.id" class="table-row" :class="{ 'failed-row': job.status === 'failed' }">
               <div class="row-title">
                 <span class="row-icon" :class="jobStatusClass(job.status)">
                   <LoaderCircle v-if="job.status === 'running' || job.status === 'queued'" class="spin" :size="20" />
@@ -388,6 +369,39 @@
       @close="showDirectoryPicker = false"
       @select="selectDirectory"
     />
+
+    <div v-if="showCreateUserModal" class="modal-backdrop" @click="closeCreateUserModal">
+      <section class="small-modal create-user-modal" @click.stop>
+        <header class="modal-header">
+          <div>
+            <h2>{{ t('admin.createUserTitle') }}</h2>
+            <p class="panel-note">{{ t('admin.noUsersHint') }}</p>
+          </div>
+          <button class="icon-button" :disabled="isBusy(createUserKey)" @click="closeCreateUserModal">
+            <X :size="18" />
+          </button>
+        </header>
+        <form class="stack-form create-user-form" @submit.prevent="createUser">
+          <input v-model="newUser.email" type="email" :placeholder="t('login.email')" required />
+          <input v-model="newUser.displayName" :placeholder="t('admin.displayName')" required />
+          <input v-model="newUser.password" type="password" :placeholder="t('admin.passwordPlaceholder')" required />
+          <select v-model="newUser.role" class="select-control">
+            <option value="member">{{ t('common.member') }}</option>
+            <option value="admin">{{ t('common.admin') }}</option>
+          </select>
+          <footer class="modal-actions create-user-actions">
+            <button class="secondary-button" type="button" :disabled="isBusy(createUserKey)" @click="closeCreateUserModal">
+              {{ t('common.cancel') }}
+            </button>
+            <button class="primary-button" type="submit" :disabled="isBusy(createUserKey)">
+              <LoaderCircle v-if="isBusy(createUserKey)" class="spin" :size="17" />
+              <UserPlus v-else :size="17" />
+              {{ isBusy(createUserKey) ? t('common.creating') : t('admin.createUser') }}
+            </button>
+          </footer>
+        </form>
+      </section>
+    </div>
 
     <div v-if="editShareTarget" class="modal-backdrop" @click="closeEditShare">
       <section class="small-modal" @click.stop>
@@ -620,6 +634,7 @@ const createLibraryKey = 'library:create';
 const createUserKey = 'user:create';
 const busyKeys = reactive<Record<string, boolean>>({});
 const showDirectoryPicker = ref(false);
+const showCreateUserModal = ref(false);
 const passwordUser = ref<User | null>(null);
 const permissionUser = ref<User | null>(null);
 const deleteLibraryTarget = ref<Library | null>(null);
@@ -809,13 +824,24 @@ async function createUser() {
   startBusy(createUserKey);
   try {
     await api.createUser(newUser.email, newUser.displayName, newUser.password, newUser.role);
-    Object.assign(newUser, { email: '', displayName: '', password: '', role: 'member' });
+    resetNewUserForm();
+    showCreateUserModal.value = false;
     await reloadAfterMutation(t('admin.userCreated'));
   } catch (err) {
     showMessage(errorMessage(err, t('admin.unableCreateUser')), 'error');
   } finally {
     stopBusy(createUserKey);
   }
+}
+
+function closeCreateUserModal() {
+  if (isBusy(createUserKey)) return;
+  showCreateUserModal.value = false;
+  resetNewUserForm();
+}
+
+function resetNewUserForm() {
+  Object.assign(newUser, { email: '', displayName: '', password: '', role: 'member' });
 }
 
 async function saveUser(user: User) {
