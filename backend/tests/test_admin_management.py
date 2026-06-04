@@ -10,10 +10,10 @@ from PIL import Image
 from sqlmodel import Session, SQLModel, create_engine, select
 
 from app.config import settings
-from app.db import get_session
+from app.db import ensure_initial_admin, get_session
 from app.main import app
 from app.models import Asset, AssetMetadata, AssetTag, Folder, LibraryPermission, LibraryRoot, ScanJob, ShareLink, Thumbnail, User
-from app.security import hash_password
+from app.security import hash_password, verify_password
 from app.services.scanner import scan_library
 
 
@@ -54,6 +54,32 @@ def isolated_client(tmp_path: Path) -> tuple[TestClient, object]:
 
     app.dependency_overrides[get_session] = override_session
     return TestClient(app), engine
+
+
+def test_initial_admin_uses_configured_display_name(tmp_path: Path) -> None:
+    engine = create_engine(f"sqlite:///{tmp_path / 'admin-name.sqlite3'}", connect_args={"check_same_thread": False})
+    SQLModel.metadata.create_all(engine)
+    old_name = settings.admin_name
+    old_email = settings.admin_email
+    old_password = settings.admin_password
+
+    try:
+        object.__setattr__(settings, "admin_name", "Deploy Owner")
+        object.__setattr__(settings, "admin_email", f"owner-{tmp_path.name}@example.com")
+        object.__setattr__(settings, "admin_password", "owner-pass-123")
+
+        with Session(engine) as session:
+            ensure_initial_admin(session)
+            admin = session.exec(select(User).where(User.email == settings.admin_email.lower())).first()
+
+        assert admin is not None
+        assert admin.display_name == "Deploy Owner"
+        assert admin.role == "admin"
+        assert verify_password("owner-pass-123", admin.password_hash)
+    finally:
+        object.__setattr__(settings, "admin_name", old_name)
+        object.__setattr__(settings, "admin_email", old_email)
+        object.__setattr__(settings, "admin_password", old_password)
 
 
 def test_admin_filesystem_requires_auth(tmp_path: Path) -> None:

@@ -76,7 +76,7 @@ def ensure_initial_admin(session: Session) -> None:
         return
     admin = User(
         email=settings.admin_email.lower(),
-        display_name="Administrator",
+        display_name=settings.admin_name,
         role="admin",
         password_hash=hash_password(settings.admin_password),
     )

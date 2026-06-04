@@ -31,13 +31,18 @@ DK Photo 是一个自托管的私有家庭相册中心，基于 Vue 3 和 FastAP
 
 ## 快速开始
 
-1. 复制 `.env.example` 为 `.env`。
-2. 在 `.env` 中设置 `PHOTOS_PATH` 为你存放照片的主机目录路径。
-3. 修改 `DK_PHOTO_ADMIN_EMAIL`、`DK_PHOTO_ADMIN_PASSWORD` 和 `DK_PHOTO_SECRET_KEY`。
-4. 启动服务：
+推荐使用交互式部署脚本：
+
+```bash
+bash deploy.sh
+```
+
+首次部署时脚本会创建 `.env`、初始化管理员显示名称/邮箱/密码、生成 `DK_PHOTO_SECRET_KEY`，并通过 Docker Compose 构建启动服务。
+
+也可以手动复制 `.env.example` 为 `.env` 后运行：
 
 ```powershell
-docker compose up --build
+docker compose up -d --build
 ```
 
 打开 `http://localhost:8080`，使用管理员账号登录。登录后进入管理页面对默认图库进行扫描，或添加其他挂载的文件夹。
@@ -70,6 +75,7 @@ Vite 开发服务器会将 `/api` 请求代理到 `http://localhost:8000`。
 
 | 变量 | 默认值 | 说明 |
 | --- | --- | --- |
+| `DK_PHOTO_ADMIN_NAME` | `Administrator` | 初始管理员显示名称，仅首次建库时生效 |
 | `DK_PHOTO_ADMIN_EMAIL` | `admin@example.com` | 初始管理员邮箱 |
 | `DK_PHOTO_ADMIN_PASSWORD` | `change-me-now` | 初始管理员密码，请务必修改 |
 | `DK_PHOTO_SECRET_KEY` | 开发默认值 | JWT 签名密钥，正式使用前务必修改 |
@@ -80,6 +86,10 @@ Vite 开发服务器会将 `/api` 请求代理到 `http://localhost:8000`。
 | `DK_PHOTO_WATCH_ENABLED` | `true` | 是否启用 watchdog 文件监控自动扫描 |
 | `PHOTOS_PATH` | `./photos` | Docker 宿主机照片目录 |
 | `APP_DATA_PATH` | `./data` | Docker 宿主机数据目录 |
+| `FRONTEND_BIND` | `0.0.0.0` | 前端监听地址 |
+| `FRONTEND_PORT` | `8080` | 前端宿主机端口 |
+| `BACKEND_BIND` | `127.0.0.1` | 后端监听地址，默认仅本机 |
+| `BACKEND_PORT` | `8000` | 后端宿主机端口 |
 
 ## API 概览
 
