@@ -451,7 +451,7 @@
         <div class="topbar-actions">
           <button
             v-if="assetActionsEnabled"
-            class="icon-button"
+            class="icon-button desktop-only-action"
             :class="{ active: selectionMode }"
             :title="selectionMode ? t('album.cancelSelection') : t('album.selectPhotos')"
             @click="toggleSelectionMode"
@@ -460,7 +460,7 @@
           </button>
           <button
             v-if="currentFolder"
-            class="icon-button"
+            class="icon-button desktop-only-action"
             :title="t('album.shareCurrentFolder')"
             @click="shareCurrentFolder"
           >
@@ -468,7 +468,7 @@
           </button>
           <button
             v-if="currentAlbum"
-            class="icon-button"
+            class="icon-button desktop-only-action"
             :title="t('album.addMediaToAlbum')"
             @click="openAlbumAssetPicker"
           >
@@ -476,7 +476,7 @@
           </button>
           <button
             v-if="currentAlbum"
-            class="icon-button"
+            class="icon-button desktop-only-action"
             :disabled="sharingAlbum"
             :title="t('album.shareCurrentAlbum')"
             @click="shareCurrentAlbum"
@@ -486,7 +486,7 @@
           </button>
           <button
             v-if="currentAlbum"
-            class="icon-button"
+            class="icon-button desktop-only-action"
             :title="t('album.editAlbum')"
             @click="openEditAlbum"
           >
@@ -494,7 +494,7 @@
           </button>
           <button
             v-if="currentAlbum"
-            class="icon-button danger-icon-button"
+            class="icon-button danger-icon-button desktop-only-action"
             :title="t('album.deleteAlbum')"
             @click="openDeleteAlbum"
           >
@@ -502,7 +502,7 @@
           </button>
           <button
             v-if="currentFolder"
-            class="icon-button"
+            class="icon-button desktop-only-action"
             :class="{ active: favoriteFilter, 'favorite-filter-button': favoriteFilter }"
             :title="favoriteFilter ? t('album.showAllPhotos') : t('album.showFavoritesOnly')"
             @click="toggleFavoriteFilter"
@@ -511,7 +511,7 @@
           </button>
           <button
             v-if="currentFolder"
-            class="icon-button"
+            class="icon-button desktop-only-action"
             :class="{ active: includeSubfolders }"
             :title="includeSubfolders ? t('album.showCurrentFolderOnly') : t('album.includeSubfolderPhotos')"
             @click="toggleIncludeSubfolders"
@@ -520,7 +520,7 @@
           </button>
           <button
             v-if="albumOverviewView"
-            class="icon-button"
+            class="icon-button desktop-only-action"
             :title="t('album.newAlbum')"
             @click="openNewAlbumModal"
           >
@@ -528,7 +528,7 @@
           </button>
           <button
             v-if="albumOverviewView"
-            class="icon-button"
+            class="icon-button desktop-only-action"
             :disabled="albumsLoading"
             :title="t('album.refreshAlbums')"
             @click="loadAlbums"
@@ -567,7 +567,7 @@
               {{ albumSortDirection === 'asc' ? t('common.sortAsc') : t('common.sortDesc') }}
             </button>
           </div>
-          <label v-if="!albumOverviewView" class="search-box" :class="{ searching: searchLoading }">
+          <label v-if="!albumOverviewView" class="search-box desktop-only-action" :class="{ searching: searchLoading }">
             <LoaderCircle v-if="searchLoading" class="spin" :size="17" />
             <Search v-else :size="17" />
             <input
@@ -582,7 +582,7 @@
           </label>
           <button
             v-if="!albumOverviewView && hasActiveAssetFilters"
-            class="icon-button"
+            class="icon-button desktop-only-action"
             :title="t('album.clearAssetFilters')"
             @click="clearAssetFilters"
           >
@@ -602,7 +602,7 @@
               {{ t('common.videos') }}
             </button>
           </div>
-          <label v-if="!albumOverviewView" class="rating-filter" :title="t('album.ratingFilter')">
+          <label v-if="!albumOverviewView" class="rating-filter desktop-only-action" :title="t('album.ratingFilter')">
             <Star :size="16" />
             <select v-model.number="ratingFilter" @change="setRatingFilter(ratingFilter)">
               <option :value="0">{{ t('album.allRatings') }}</option>
@@ -630,7 +630,7 @@
               {{ sortDirection === 'asc' ? t('common.sortAsc') : t('common.sortDesc') }}
             </button>
           </div>
-          <div v-if="!albumOverviewView" class="segmented-control thumbnail-size-control" :aria-label="t('album.thumbnailSize')">
+          <div v-if="!albumOverviewView" class="segmented-control thumbnail-size-control desktop-only-action" :aria-label="t('album.thumbnailSize')">
             <button :class="{ active: thumbSize === 'small' }" :title="t('album.compactThumbnails')" @click="setThumbSize('small')">
               <Grid2X2 :size="16" />
               {{ t('common.compact') }}
@@ -644,157 +644,251 @@
               {{ t('common.large') }}
             </button>
           </div>
-          <LanguageToggle />
-          <button class="icon-button" :title="t('common.toggleTheme')" @click="toggleTheme">
+          <LanguageToggle class="desktop-only-action" />
+          <button class="icon-button desktop-only-action" :title="t('common.toggleTheme')" @click="toggleTheme">
             <Sun v-if="isDark" :size="18" />
             <Moon v-else :size="18" />
           </button>
-          <button class="icon-button" :title="t('common.signOut')" @click="logout">
+          <button
+            v-if="!albumOverviewView"
+            class="icon-button mobile-search-trigger"
+            :title="t('common.search')"
+            @click="showSearchOverlay = true"
+          >
+            <Search :size="19" />
+          </button>
+          <button class="icon-button mobile-more-trigger" :title="t('common.more')" @click="showMoreSheet = !showMoreSheet">
+            <MoreHorizontal :size="19" />
+          </button>
+          <button class="icon-button desktop-only-action" :title="t('common.signOut')" @click="logout">
             <LogOut :size="18" />
           </button>
         </div>
       </header>
 
+      <div v-if="mobileTree" class="mobile-sheet-backdrop" @click="mobileTree = false" />
       <div v-if="mobileTree" class="mobile-folder-sheet">
+        <div class="more-sheet-handle"></div>
         <div class="mobile-sheet-header">
           <strong>{{ t('common.libraries') }}</strong>
           <button class="icon-button" :title="t('album.closeFolders')" @click="mobileTree = false">
             <X :size="17" />
           </button>
         </div>
-        <label class="library-filter mobile-library-filter">
-          <Search :size="16" />
-          <input v-model="libraryFilter" :placeholder="t('album.filterLibraries')" />
-          <button v-if="libraryFilter" class="search-clear" type="button" :title="t('album.clearLibraryFilter')" @click="libraryFilter = ''">
-            <X :size="14" />
+
+        <div class="more-sheet-group">
+          <button class="mobile-folder-button" :class="{ active: rootViewActive }" @click="goRoot(); mobileTree = false">
+            <FolderRoot :size="17" />
+            <span>{{ t('album.allLibraries') }}</span>
+            <small>{{ rootFolders.length }}</small>
           </button>
-        </label>
-        <label v-if="photoAlbums.length" class="library-filter mobile-library-filter">
-          <Search :size="16" />
-          <input v-model="albumFilter" :placeholder="t('album.filterAlbums')" />
-          <button v-if="albumFilter" class="search-clear" type="button" :title="t('album.clearAlbumFilter')" @click="albumFilter = ''">
-            <X :size="14" />
+          <button class="mobile-folder-button" :class="{ active: allPhotosView }" @click="openAllPhotosView(); mobileTree = false">
+            <Images :size="17" />
+            <span>{{ t('album.allPhotos') }}</span>
           </button>
-        </label>
-        <button class="mobile-folder-button" :class="{ active: !currentFolder && !favoritesView && !allPhotosView && !recentView && !videosView && !placesView && !currentPlace && !currentTag && !currentRating && !currentCamera && !currentLens && !currentAlbum && !albumOverviewView }" @click="goRoot">
-          <FolderRoot :size="17" />
-          <span>{{ t('album.allLibraries') }}</span>
-          <small>{{ rootFolders.length }}</small>
-        </button>
-        <button class="mobile-folder-button" :class="{ active: allPhotosView }" @click="openAllPhotosView">
-          <Images :size="17" />
-          <span>{{ t('album.allPhotos') }}</span>
-          <small>{{ assets.length }}</small>
-        </button>
-        <button class="mobile-folder-button" :class="{ active: recentView }" @click="openRecentView">
-          <Clock :size="17" />
-          <span>{{ t('album.recentlyAdded') }}</span>
-          <small>{{ assets.length }}</small>
-        </button>
-        <button class="mobile-folder-button" :class="{ active: videosView }" @click="openVideosView">
-          <Video :size="17" />
-          <span>{{ t('album.videos') }}</span>
-          <small>{{ assets.length }}</small>
-        </button>
-        <button class="mobile-folder-button" :class="{ active: placesView }" @click="openPlacesView">
-          <MapPin :size="17" />
-          <span>{{ t('album.places') }}</span>
-          <small>{{ assets.length }}</small>
-        </button>
-        <button class="mobile-folder-button" :class="{ active: favoritesView }" @click="openFavoritesView">
-          <Star :size="17" />
-          <span>{{ t('album.favorites') }}</span>
-          <small>{{ assets.length }}</small>
-        </button>
-        <button class="mobile-folder-button" :class="{ active: albumOverviewView }" @click="openAlbumOverviewView">
-          <Images :size="17" />
-          <span>{{ t('album.albums') }}</span>
-          <small>{{ photoAlbums.length }}</small>
-        </button>
-        <button
-          v-for="camera in filteredAssetCameras"
-          :key="`camera-${camera.camera_key}`"
-          class="mobile-folder-button"
-          :class="{ active: currentCamera?.camera_key === camera.camera_key }"
-          @click="openCameraView(camera)"
-        >
-          <Camera :size="17" />
-          <span>{{ camera.label }}</span>
-          <small>{{ camera.asset_count }}</small>
-        </button>
-        <button
-          v-for="lens in filteredAssetLenses"
-          :key="`lens-${lens.lens_key}`"
-          class="mobile-folder-button"
-          :class="{ active: currentLens?.lens_key === lens.lens_key }"
-          @click="openLensView(lens)"
-        >
-          <Aperture :size="17" />
-          <span>{{ lens.label }}</span>
-          <small>{{ lens.asset_count }}</small>
-        </button>
-        <button
-          v-for="rating in filteredAssetRatings"
-          :key="`rating-${rating.rating}`"
-          class="mobile-folder-button"
-          :class="{ active: currentRating === rating.rating }"
-          @click="openRatingView(rating.rating)"
-        >
-          <Star :size="17" fill="currentColor" />
-          <span>{{ t('album.ratingAtLeast', { rating: rating.rating }) }}</span>
-          <small>{{ rating.asset_count }}</small>
-        </button>
-        <label v-if="assetTags.length" class="library-filter mobile-library-filter">
-          <Search :size="16" />
-          <input v-model="tagFilter" :placeholder="t('album.searchTags')" />
-          <button v-if="tagFilter" class="search-clear" type="button" :title="t('common.clearSearch')" @click="tagFilter = ''">
-            <X :size="14" />
+          <button class="mobile-folder-button" :class="{ active: albumOverviewView }" @click="openAlbumOverviewView(); mobileTree = false">
+            <Images :size="17" />
+            <span>{{ t('album.albums') }}</span>
+            <small>{{ photoAlbums.length }}</small>
           </button>
-        </label>
-        <button
-          v-for="tag in filteredAssetTags"
-          :key="`tag-${tag.name}`"
-          class="mobile-folder-button"
-          :class="{ active: currentTag === tag.name }"
-          @click="openTagView(tag.name)"
-        >
-          <Tag :size="17" />
-          <span>{{ tag.name }}</span>
-          <small>{{ tag.asset_count }}</small>
-        </button>
-        <button
-          v-for="album in filteredPhotoAlbums"
-          :key="`album-${album.id}`"
-          class="mobile-folder-button"
-          :class="{ active: currentAlbum?.id === album.id }"
-          @click="openAlbumView(album)"
-        >
-          <Images :size="17" />
-          <span>{{ album.name }}</span>
-          <small>{{ album.asset_count }}</small>
-        </button>
-        <button
-          v-for="folder in filteredRootFolders"
-          :key="folder.id"
-          class="mobile-folder-button"
-          :class="{ active: currentFolder?.id === folder.id }"
-          @click="openFolder(folder)"
-        >
-          <Folder :size="17" />
-          <span>{{ folder.name }}</span>
-          <small>{{ folder.photo_count }}</small>
-        </button>
-        <div v-if="!rootFolders.length" class="mobile-sheet-empty">
-          {{ t('album.noLibrariesAvailable') }}
+          <button class="mobile-folder-button" :class="{ active: recentView }" @click="openRecentView(); mobileTree = false">
+            <Clock :size="17" />
+            <span>{{ t('album.recentlyAdded') }}</span>
+          </button>
+          <button class="mobile-folder-button" :class="{ active: videosView }" @click="openVideosView(); mobileTree = false">
+            <Video :size="17" />
+            <span>{{ t('album.videos') }}</span>
+          </button>
+          <button class="mobile-folder-button" :class="{ active: placesView }" @click="openPlacesView(); mobileTree = false">
+            <MapPin :size="17" />
+            <span>{{ t('album.places') }}</span>
+          </button>
+          <button class="mobile-folder-button" :class="{ active: favoritesView }" @click="openFavoritesView(); mobileTree = false">
+            <Star :size="17" />
+            <span>{{ t('album.favorites') }}</span>
+          </button>
         </div>
-        <div v-if="photoAlbums.length && albumFilter.trim() && !filteredPhotoAlbums.length" class="mobile-sheet-empty">
-          {{ t('album.noAlbumsMatch', { query: albumFilter.trim() }) }}
+
+        <div v-if="rootFolders.length" class="more-sheet-group">
+          <div class="sidebar-section-header" @click="toggleSection('ms-libraries')">
+            <span class="section-header-label">
+              <ChevronDown :size="14" class="collapse-chevron" :class="{ collapsed: collapsedSections['ms-libraries'] }" />
+              <span>{{ t('album.libraries') }}</span>
+            </span>
+            <small class="status-pill neutral">{{ rootFolders.length }}</small>
+          </div>
+          <Transition name="sidebar-collapse">
+            <div v-show="!collapsedSections['ms-libraries']" class="sidebar-collapse-panel">
+              <div class="sidebar-collapse-panel-inner">
+                <label class="library-filter mobile-library-filter">
+                  <Search :size="16" />
+                  <input v-model="libraryFilter" :placeholder="t('album.filterLibraries')" />
+                  <button v-if="libraryFilter" class="search-clear" type="button" @click="libraryFilter = ''">
+                    <X :size="14" />
+                  </button>
+                </label>
+                <div v-if="rootFolders.length && libraryFilter.trim() && !filteredRootFolders.length" class="mobile-sheet-empty">
+                  {{ t('album.noLibrariesMatch', { query: libraryFilter.trim() }) }}
+                </div>
+                <button
+                  v-for="folder in filteredRootFolders"
+                  :key="folder.id"
+                  class="mobile-folder-button"
+                  :class="{ active: currentFolder?.id === folder.id }"
+                  @click="openFolder(folder); mobileTree = false"
+                >
+                  <Folder :size="17" />
+                  <span>{{ folder.name }}</span>
+                  <small>{{ folder.photo_count }}</small>
+                </button>
+              </div>
+            </div>
+          </Transition>
         </div>
-        <div v-if="assetTags.length && tagFilter.trim() && !filteredAssetTags.length" class="mobile-sheet-empty">
-          {{ t('album.noTagsMatch', { query: tagFilter.trim() }) }}
+
+        <div v-if="photoAlbums.length" class="more-sheet-group">
+          <div class="sidebar-section-header" @click="toggleSection('ms-albums')">
+            <span class="section-header-label">
+              <ChevronDown :size="14" class="collapse-chevron" :class="{ collapsed: collapsedSections['ms-albums'] }" />
+              <span>{{ t('album.albums') }}</span>
+            </span>
+            <small class="status-pill neutral">{{ photoAlbums.length }}</small>
+          </div>
+          <Transition name="sidebar-collapse">
+            <div v-show="!collapsedSections['ms-albums']" class="sidebar-collapse-panel">
+              <div class="sidebar-collapse-panel-inner">
+                <label class="library-filter mobile-library-filter">
+                  <Search :size="16" />
+                  <input v-model="albumFilter" :placeholder="t('album.filterAlbums')" />
+                  <button v-if="albumFilter" class="search-clear" type="button" @click="albumFilter = ''">
+                    <X :size="14" />
+                  </button>
+                </label>
+                <button
+                  v-for="album in filteredPhotoAlbums"
+                  :key="album.id"
+                  class="mobile-folder-button"
+                  :class="{ active: currentAlbum?.id === album.id }"
+                  @click="openAlbumView(album); mobileTree = false"
+                >
+                  <Images :size="17" />
+                  <span>{{ album.name }}</span>
+                  <small>{{ album.asset_count }}</small>
+                </button>
+              </div>
+            </div>
+          </Transition>
         </div>
-        <div v-if="rootFolders.length && libraryFilter.trim() && !filteredRootFolders.length" class="mobile-sheet-empty">
-          {{ t('album.noLibrariesMatch', { query: libraryFilter.trim() }) }}
+
+        <div v-if="filteredAssetCameras.length" class="more-sheet-group">
+          <div class="sidebar-section-header" @click="toggleSection('ms-cameras')">
+            <span class="section-header-label">
+              <ChevronDown :size="14" class="collapse-chevron" :class="{ collapsed: collapsedSections['ms-cameras'] }" />
+              <span>{{ t('album.cameras') }}</span>
+            </span>
+          </div>
+          <Transition name="sidebar-collapse">
+            <div v-show="!collapsedSections['ms-cameras']" class="sidebar-collapse-panel">
+              <div class="sidebar-collapse-panel-inner">
+                <button
+                  v-for="camera in filteredAssetCameras"
+                  :key="camera.camera_key"
+                  class="mobile-folder-button"
+                  :class="{ active: currentCamera?.camera_key === camera.camera_key }"
+                  @click="openCameraView(camera); mobileTree = false"
+                >
+                  <Camera :size="17" />
+                  <span>{{ camera.label }}</span>
+                  <small>{{ camera.asset_count }}</small>
+                </button>
+              </div>
+            </div>
+          </Transition>
+        </div>
+
+        <div v-if="filteredAssetLenses.length" class="more-sheet-group">
+          <div class="sidebar-section-header" @click="toggleSection('ms-lenses')">
+            <span class="section-header-label">
+              <ChevronDown :size="14" class="collapse-chevron" :class="{ collapsed: collapsedSections['ms-lenses'] }" />
+              <span>{{ t('album.lenses') }}</span>
+            </span>
+          </div>
+          <Transition name="sidebar-collapse">
+            <div v-show="!collapsedSections['ms-lenses']" class="sidebar-collapse-panel">
+              <div class="sidebar-collapse-panel-inner">
+                <button
+                  v-for="lens in filteredAssetLenses"
+                  :key="lens.lens_key"
+                  class="mobile-folder-button"
+                  :class="{ active: currentLens?.lens_key === lens.lens_key }"
+                  @click="openLensView(lens); mobileTree = false"
+                >
+                  <Aperture :size="17" />
+                  <span>{{ lens.label }}</span>
+                  <small>{{ lens.asset_count }}</small>
+                </button>
+              </div>
+            </div>
+          </Transition>
+        </div>
+
+        <div v-if="filteredAssetRatings.length" class="more-sheet-group">
+          <div class="sidebar-section-header" @click="toggleSection('ms-ratings')">
+            <span class="section-header-label">
+              <ChevronDown :size="14" class="collapse-chevron" :class="{ collapsed: collapsedSections['ms-ratings'] }" />
+              <span>{{ t('album.ratings') }}</span>
+            </span>
+          </div>
+          <Transition name="sidebar-collapse">
+            <div v-show="!collapsedSections['ms-ratings']" class="sidebar-collapse-panel">
+              <div class="sidebar-collapse-panel-inner">
+                <button
+                  v-for="rating in filteredAssetRatings"
+                  :key="rating.rating"
+                  class="mobile-folder-button"
+                  :class="{ active: currentRating === rating.rating }"
+                  @click="openRatingView(rating.rating); mobileTree = false"
+                >
+                  <Star :size="17" fill="currentColor" />
+                  <span>{{ t('album.ratingAtLeast', { rating: rating.rating }) }}</span>
+                  <small>{{ rating.asset_count }}</small>
+                </button>
+              </div>
+            </div>
+          </Transition>
+        </div>
+
+        <div v-if="assetTags.length" class="more-sheet-group">
+          <div class="sidebar-section-header" @click="toggleSection('ms-tags')">
+            <span class="section-header-label">
+              <ChevronDown :size="14" class="collapse-chevron" :class="{ collapsed: collapsedSections['ms-tags'] }" />
+              <span>{{ t('album.tags') }}</span>
+            </span>
+          </div>
+          <Transition name="sidebar-collapse">
+            <div v-show="!collapsedSections['ms-tags']" class="sidebar-collapse-panel">
+              <div class="sidebar-collapse-panel-inner">
+                <label class="library-filter mobile-library-filter">
+                  <Search :size="16" />
+                  <input v-model="tagFilter" :placeholder="t('album.searchTags')" />
+                  <button v-if="tagFilter" class="search-clear" type="button" @click="tagFilter = ''">
+                    <X :size="14" />
+                  </button>
+                </label>
+                <button
+                  v-for="tag in filteredAssetTags"
+                  :key="tag.name"
+                  class="mobile-folder-button"
+                  :class="{ active: currentTag === tag.name }"
+                  @click="openTagView(tag.name); mobileTree = false"
+                >
+                  <Tag :size="17" />
+                  <span>{{ tag.name }}</span>
+                  <small>{{ tag.asset_count }}</small>
+                </button>
+              </div>
+            </div>
+          </Transition>
         </div>
       </div>
 
@@ -1833,6 +1927,192 @@
         </div>
       </div>
     </Teleport>
+
+    <Teleport to="body">
+      <div v-if="showMoreSheet" class="more-sheet-backdrop" @click="showMoreSheet = false" />
+      <div v-if="showMoreSheet" class="more-sheet">
+        <div class="more-sheet-handle"></div>
+        <div class="more-sheet-title">
+          <span>{{ t('common.more') }}</span>
+          <button class="icon-button" :title="t('common.close')" @click="showMoreSheet = false">
+            <X :size="18" />
+          </button>
+        </div>
+
+        <div v-if="currentFolder || currentAlbum || !albumOverviewView" class="more-sheet-group">
+          <span class="more-sheet-group-label">{{ t('album.actions') }}</span>
+          <button v-if="assetActionsEnabled" class="more-sheet-item" :class="{ active: selectionMode }" @click="toggleSelectionMode(); showMoreSheet = false">
+            <ListChecks :size="18" />
+            {{ selectionMode ? t('album.cancelSelection') : t('album.selectPhotos') }}
+          </button>
+          <button v-if="currentFolder" class="more-sheet-item" @click="shareCurrentFolder(); showMoreSheet = false">
+            <Share2 :size="18" />
+            {{ t('album.shareCurrentFolder') }}
+          </button>
+          <button v-if="currentFolder" class="more-sheet-item" :class="{ active: favoriteFilter }" @click="toggleFavoriteFilter(); showMoreSheet = false">
+            <Star :size="18" />
+            {{ favoriteFilter ? t('album.showAllPhotos') : t('album.showFavoritesOnly') }}
+          </button>
+          <button v-if="currentFolder" class="more-sheet-item" :class="{ active: includeSubfolders }" @click="toggleIncludeSubfolders(); showMoreSheet = false">
+            <FolderTree :size="18" />
+            {{ includeSubfolders ? t('album.showCurrentFolderOnly') : t('album.includeSubfolderPhotos') }}
+          </button>
+          <template v-if="currentAlbum">
+            <button class="more-sheet-item" @click="openAlbumAssetPicker(); showMoreSheet = false">
+              <Plus :size="18" />
+              {{ t('album.addMediaToAlbum') }}
+            </button>
+            <button class="more-sheet-item" :disabled="sharingAlbum" @click="shareCurrentAlbum(); showMoreSheet = false">
+              <LoaderCircle v-if="sharingAlbum" class="spin" :size="18" />
+              <Share2 v-else :size="18" />
+              {{ t('album.shareCurrentAlbum') }}
+            </button>
+            <button class="more-sheet-item" @click="openEditAlbum(); showMoreSheet = false">
+              <Pencil :size="18" />
+              {{ t('album.editAlbum') }}
+            </button>
+            <button class="more-sheet-item danger" @click="openDeleteAlbum(); showMoreSheet = false">
+              <Trash2 :size="18" />
+              {{ t('album.deleteAlbum') }}
+            </button>
+          </template>
+          <button v-if="!albumOverviewView && hasActiveAssetFilters" class="more-sheet-item" @click="clearAssetFilters(); showMoreSheet = false">
+            <FilterX :size="18" />
+            {{ t('album.clearAssetFilters') }}
+          </button>
+        </div>
+
+        <div v-if="!albumOverviewView" class="more-sheet-group">
+          <span class="more-sheet-group-label">{{ t('album.display') }}</span>
+          <div class="more-sheet-item">
+            <Star :size="18" />
+            <span>{{ t('album.ratingFilter') }}</span>
+            <select v-model.number="ratingFilter" class="select-control" style="margin-left: auto; min-width: 100px;" @change="setRatingFilter(ratingFilter)">
+              <option :value="0">{{ t('album.allRatings') }}</option>
+              <option v-for="rating in ratingOptions" :key="rating" :value="rating">
+                {{ t('album.ratingAtLeast', { rating }) }}
+              </option>
+            </select>
+          </div>
+          <button class="more-sheet-item" :class="{ active: thumbSize === 'small' }" @click="setThumbSize('small')">
+            <Grid2X2 :size="18" />
+            {{ t('common.compact') }}
+          </button>
+          <button class="more-sheet-item" :class="{ active: thumbSize === 'medium' }" @click="setThumbSize('medium')">
+            <LayoutGrid :size="18" />
+            {{ t('common.balanced') }}
+          </button>
+          <button class="more-sheet-item" :class="{ active: thumbSize === 'large' }" @click="setThumbSize('large')">
+            <Maximize2 :size="18" />
+            {{ t('common.large') }}
+          </button>
+        </div>
+
+        <div class="more-sheet-group">
+          <span class="more-sheet-group-label">{{ t('common.app') }}</span>
+          <button class="more-sheet-item" @click="toggleTheme(); showMoreSheet = false">
+            <Sun v-if="isDark" :size="18" />
+            <Moon v-else :size="18" />
+            <span>{{ t('common.theme') }}</span>
+          </button>
+          <div class="more-sheet-item more-sheet-language">
+            <span>{{ t('language.toggleTitle') }}</span>
+            <LanguageToggle class="more-sheet-language-toggle" />
+          </div>
+          <button class="more-sheet-item danger" @click="logout(); showMoreSheet = false">
+            <LogOut :size="18" />
+            {{ t('common.signOut') }}
+          </button>
+        </div>
+      </div>
+    </Teleport>
+
+    <Teleport to="body">
+      <div v-if="showSearchOverlay" class="topbar-search-overlay">
+        <div class="topbar-search-overlay-header">
+          <label class="search-box" :class="{ searching: searchLoading }">
+            <LoaderCircle v-if="searchLoading" class="spin" :size="17" />
+            <Search v-else :size="17" />
+            <input
+              ref="mobileSearchInputRef"
+              v-model="search"
+              :disabled="loading"
+              :placeholder="searchPlaceholder"
+              @input="queueAssetSearch"
+            />
+            <button v-if="search" class="search-clear" type="button" :title="t('common.clearSearch')" @click="clearSearch">
+              <X :size="15" />
+            </button>
+          </label>
+          <button class="icon-button" :title="t('common.close')" @click="showSearchOverlay = false">
+            <X :size="18" />
+          </button>
+        </div>
+        <div class="topbar-search-overlay-body">
+          <div v-if="searchLoading" class="search-loading">
+            <LoaderCircle class="spin" :size="22" />
+            <span>{{ t('album.searching') }}</span>
+          </div>
+          <div v-else-if="search && !displayAssets.length" class="search-empty">
+            <Search :size="36" />
+            <strong>{{ t('album.noMatchesFound') }}</strong>
+            <span>{{ searchEmptyHint }}</span>
+            <button class="secondary-button" @click="clearSearch">
+              <X :size="17" />
+              {{ t('common.clearSearch') }}
+            </button>
+          </div>
+          <div v-else-if="hasSearch" class="search-results-panel">
+            <div class="search-results-summary">
+              <span class="search-active-filter">
+                {{ searchQuery }}
+                <button class="search-clear" type="button" :title="t('common.clearSearch')" @click="clearSearch()">
+                  <X :size="14" />
+                </button>
+              </span>
+              <small>{{ t('album.searchResultCount', { count: displayAssets.length }) }}</small>
+            </div>
+            <div class="search-result-list">
+              <button
+                v-for="(asset, index) in displayAssets.slice(0, 24)"
+                :key="asset.id"
+                class="search-result-item"
+                @click="showSearchOverlay = false; openViewer(index)"
+              >
+                <img :src="thumbnailUrl(asset.id, 'small')" :alt="asset.filename" loading="lazy" />
+                <span>
+                  <strong>{{ asset.filename }}</strong>
+                  <small>{{ assetDateLabel(asset) }} / {{ formatBytes(asset.size) }}</small>
+                </span>
+              </button>
+            </div>
+          </div>
+          <div v-else class="search-empty">
+            <Search :size="36" />
+            <span>{{ t('album.searchPlaceholder') }}</span>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <nav v-if="!albumOverviewView" class="bottom-nav mobile-only">
+      <button class="bottom-nav-item" :class="{ active: rootViewActive }" @click="goRoot">
+        <FolderRoot :size="20" />
+        <span>{{ t('common.libraries') }}</span>
+      </button>
+      <button class="bottom-nav-item" :class="{ active: allPhotosView }" @click="openAllPhotosView">
+        <Images :size="20" />
+        <span>{{ t('album.allPhotos') }}</span>
+      </button>
+      <button class="bottom-nav-item" :class="{ active: favoritesView }" @click="openFavoritesView">
+        <Star :size="20" />
+        <span>{{ t('album.favorites') }}</span>
+      </button>
+      <button class="bottom-nav-item" :class="{ active: showMoreSheet }" @click="showMoreSheet = !showMoreSheet">
+        <MoreHorizontal :size="20" />
+        <span>{{ t('common.more') }}</span>
+      </button>
+    </nav>
   </main>
 </template>
 
@@ -1866,6 +2146,7 @@ import {
   MapPin,
   Maximize2,
   Moon,
+  MoreHorizontal,
   PanelLeft,
   Pencil,
   Play,
@@ -1954,6 +2235,9 @@ const searchLoading = ref(false);
 const error = ref('');
 const viewerIndex = ref<number | null>(null);
 const mobileTree = ref(false);
+const showMoreSheet = ref(false);
+const showSearchOverlay = ref(false);
+const mobileSearchInputRef = ref<HTMLInputElement | null>(null);
 const toastMessage = ref('');
 let toastTimer: ReturnType<typeof setTimeout> | null = null;
 let searchTimer: ReturnType<typeof setTimeout> | null = null;
@@ -2035,6 +2319,12 @@ const collapsedSections = ref<Record<string, boolean>>({
   lenses: true,
   ratings: true,
   tags: true,
+  'ms-libraries': false,
+  'ms-albums': true,
+  'ms-cameras': true,
+  'ms-lenses': true,
+  'ms-ratings': true,
+  'ms-tags': true,
 });
 const myShares = ref<ShareLink[]>([]);
 const sharesLoading = ref(false);
@@ -2142,6 +2432,24 @@ const hasActiveAssetFilters = computed(
 const assetActionsEnabled = computed(() =>
   Boolean(currentFolder.value || favoritesView.value || allPhotosView.value || recentView.value || videosView.value || currentPlace.value || currentTag.value || currentRating.value || currentCamera.value || currentLens.value || currentAlbum.value || globalSearchActive.value),
 );
+const rootViewActive = computed(
+  () =>
+    !currentFolder.value &&
+    !favoritesView.value &&
+    !allPhotosView.value &&
+    !recentView.value &&
+    !videosView.value &&
+    !placesView.value &&
+    !currentPlace.value &&
+    !currentTag.value &&
+    !currentRating.value &&
+    !currentCamera.value &&
+    !currentLens.value &&
+    !currentAlbum.value &&
+    !albumOverviewView.value &&
+    !globalSearchActive.value,
+);
+
 const pageEyebrow = computed(() => {
   if (currentAlbum.value) return t('album.albumEyebrow');
   if (albumOverviewView.value) return t('album.albumEyebrow');
@@ -2334,6 +2642,13 @@ watch(albumTargetFilter, () => {
   if (!createAlbumOpen.value || createAlbumName.value.trim()) return;
   if (selectedTargetAlbumId.value && filteredTargetAlbums.value.some((album) => album.id === selectedTargetAlbumId.value)) return;
   selectedTargetAlbumId.value = filteredTargetAlbums.value[0]?.id ?? null;
+});
+
+watch(showSearchOverlay, (value) => {
+  if (!value) return;
+  nextTick(() => {
+    mobileSearchInputRef.value?.focus();
+  });
 });
 
 watch(mediaFilter, (value) => localStorage.setItem('dk-photo-media-filter', value));

@@ -90,7 +90,15 @@
     <button class="viewer-nav left" @click="previous" :title="t('viewer.previous')">
       <ChevronLeft :size="28" />
     </button>
-    <div ref="stageRef" class="viewer-stage" :class="{ loading: mediaLoading, failed: !!mediaError, zoomed: !isVideo && zoom > 1 }" @wheel.prevent="handleWheel">
+    <div
+      ref="stageRef"
+      class="viewer-stage"
+      :class="{ loading: mediaLoading, failed: !!mediaError, zoomed: !isVideo && zoom > 1 }"
+      @wheel.prevent="handleWheel"
+      @touchstart="handleTouchStart"
+      @touchend="handleTouchEnd"
+      @touchcancel="cancelTouch"
+    >
       <div v-if="hasMultipleAssets" class="viewer-context previous">
         <span>{{ t('viewer.previous') }}</span>
         <strong>{{ previousAsset.filename }}</strong>
@@ -369,7 +377,7 @@ const viewerRef = ref<HTMLElement | null>(null);
 const stageRef = ref<HTMLElement | null>(null);
 const filmstripRef = ref<HTMLElement | null>(null);
 const { t, formatDateTime } = useLocale();
-const showInfo = ref(true);
+const showInfo = ref(typeof window !== 'undefined' ? window.innerWidth > 900 : true);
 const current = computed(() => props.assets[props.index]);
 const metaText = computed(() => `${props.index + 1} / ${props.assets.length}`);
 const previousAsset = computed(() => props.assets[props.index === 0 ? props.assets.length - 1 : props.index - 1] ?? current.value);
@@ -409,6 +417,10 @@ const mediaError = ref('');
 const mediaRetry = ref(0);
 const downloading = ref(false);
 const slideshowPlaying = ref(false);
+const touchStartX = ref(0);
+const touchStartY = ref(0);
+const touchActive = ref(false);
+const minSwipeDistance = 50;
 const tagEditing = ref(false);
 const tagInput = ref('');
 const tagInputRef = ref<HTMLInputElement | null>(null);
@@ -527,6 +539,35 @@ onBeforeUnmount(() => {
   stageResizeObserver?.disconnect();
   stopSlideshow();
 });
+
+function handleTouchStart(event: TouchEvent) {
+  touchActive.value = false;
+  if (!hasMultipleAssets.value) return;
+  if (event.touches.length !== 1) return;
+  if (!isVideo.value && zoom.value > 1) return;
+  const touch = event.touches[0];
+  touchStartX.value = touch.clientX;
+  touchStartY.value = touch.clientY;
+  touchActive.value = true;
+}
+
+function handleTouchEnd(event: TouchEvent) {
+  if (!touchActive.value || !hasMultipleAssets.value) return;
+  touchActive.value = false;
+  if (!isVideo.value && zoom.value > 1) return;
+  const touch = event.changedTouches[0];
+  const deltaX = touch.clientX - touchStartX.value;
+  const deltaY = touch.clientY - touchStartY.value;
+  if (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > minSwipeDistance) {
+    event.preventDefault();
+    if (deltaX > 0) previous();
+    else next();
+  }
+}
+
+function cancelTouch() {
+  touchActive.value = false;
+}
 
 function handleKey(event: KeyboardEvent) {
   if (props.shortcutsDisabled) return;
