@@ -26,6 +26,8 @@ services:
   frontend:
     build:
       context: ./frontend
+      args:
+        NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmjs.org/}
     container_name: dk-photo-frontend
     restart: unless-stopped
     depends_on:

@@ -32,11 +32,12 @@ bash deploy.sh
 1. 检查 Docker Engine 和 Docker Compose 插件。
 2. 如果 Ubuntu/Debian 上未安装 Docker，询问是否自动安装。
 3. 创建 `.env`。
-4. 首次部署时初始化管理员显示名称、邮箱和密码。
-5. 自动生成 `DK_PHOTO_SECRET_KEY`。
-6. 创建数据目录和照片目录。
-7. 检查端口占用；如果默认端口被占用，提示输入新的宿主机端口并写回 `.env`。
-8. 构建并启动服务。
+4. 配置 Docker 可访问的宿主机照片目录和数据目录。
+5. 首次部署时初始化管理员显示名称、邮箱和密码。
+6. 自动生成 `DK_PHOTO_SECRET_KEY`。
+7. 创建数据目录和照片目录。
+8. 检查端口占用；如果默认端口被占用，提示输入新的宿主机端口并写回 `.env`。
+9. 构建并启动服务。
 
 > 自动安装 Docker 需要服务器能访问外网，并且当前用户具有 `sudo` 权限。非 Ubuntu/Debian 系统需要先手动安装 Docker 与 Compose 插件。
 
@@ -51,6 +52,29 @@ bash deploy.sh
 密码可以留空，脚本会自动生成强密码并在部署完成后显示一次，同时保存到 `.env`。
 
 如果 `APP_DATA_PATH/dk_photo.sqlite3` 已存在，脚本不会用 `.env` 覆盖已有管理员。已有账号请在应用后台修改。
+
+## 快速配置可访问目录
+
+Docker 容器不能直接访问宿主机任意目录，必须通过 volume 映射。最简单的方式是在首次运行 `bash deploy.sh` 时按提示输入：
+
+```text
+Host photos directory [/opt/DK_Photo/photos]: /mnt/nas/family-photos
+App data directory [/opt/DK_Photo/data]: /opt/dk-photo-data
+```
+
+脚本会写入 `.env`：
+
+```env
+PHOTOS_PATH=/mnt/nas/family-photos
+APP_DATA_PATH=/opt/dk-photo-data
+```
+
+Compose 会把它们映射为：
+
+- 宿主机 `${PHOTOS_PATH}` → 容器 `/photos`，只读，用于照片库
+- 宿主机 `${APP_DATA_PATH}` → 容器 `/app/data`，读写，用于数据库和缩略图
+
+因此管理后台的文件浏览器里应选择容器内路径 `/photos`，而不是宿主机路径 `/mnt/nas/family-photos`。
 
 ## 手动部署
 
@@ -83,8 +107,15 @@ docker compose ps
 | `FRONTEND_PORT` | 否 | `8080` | 前端宿主机端口 |
 | `BACKEND_BIND` | 否 | `127.0.0.1` | 后端监听地址，默认仅本机 |
 | `BACKEND_PORT` | 否 | `8000` | 后端宿主机端口 |
+| `NPM_REGISTRY` | 否 | `https://registry.npmjs.org/` | 前端 Docker 构建时使用的 npm registry |
 
 `BACKEND_PORT` 只影响宿主机直接访问后端的端口，例如 `http://localhost:8001/docs`。前端容器内的 `/api` 代理仍通过 Docker 网络访问 `backend:8000`，因此修改 `BACKEND_PORT` 不会破坏前端访问后端。
+
+如果构建时经常出现 npm 包下载超时，可以在 `.env` 中改为：
+
+```env
+NPM_REGISTRY=https://registry.npmmirror.com
+```
 
 ## 目录结构
 

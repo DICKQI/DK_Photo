@@ -38,6 +38,7 @@ bash deploy.sh
 ```
 
 首次部署时脚本会创建 `.env`、初始化管理员显示名称/邮箱/密码、生成 `DK_PHOTO_SECRET_KEY`，并通过 Docker Compose 构建启动服务。
+脚本也会提示配置宿主机照片目录，并将它映射为容器内的 `/photos`。
 
 也可以手动复制 `.env.example` 为 `.env` 后运行：
 
@@ -90,6 +91,7 @@ Vite 开发服务器会将 `/api` 请求代理到 `http://localhost:8000`。
 | `FRONTEND_PORT` | `8080` | 前端宿主机端口 |
 | `BACKEND_BIND` | `127.0.0.1` | 后端监听地址，默认仅本机 |
 | `BACKEND_PORT` | `8000` | 后端宿主机端口 |
+| `NPM_REGISTRY` | `https://registry.npmjs.org/` | 前端 Docker 构建时使用的 npm registry |
 
 ## API 概览
 

@@ -1,8 +1,13 @@
 FROM node:22-alpine AS build
 
+ARG NPM_REGISTRY=https://registry.npmjs.org/
+
 WORKDIR /app
 COPY package.json pnpm-lock.yaml* ./
-RUN corepack enable && corepack prepare pnpm@9.15.4 --activate && pnpm install --frozen-lockfile
+RUN corepack enable \
+    && corepack prepare pnpm@9.15.4 --activate \
+    && pnpm config set registry "$NPM_REGISTRY" \
+    && pnpm install --frozen-lockfile
 COPY . .
 RUN pnpm run build
 
