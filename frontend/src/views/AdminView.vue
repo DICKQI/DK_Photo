@@ -140,126 +140,131 @@
         </div>
       </article>
 
-      <article class="admin-panel">
-        <header>
-          <h2>{{ t('admin.createUserTitle') }}</h2>
-        </header>
-        <form class="stack-form" @submit.prevent="createUser">
-          <input v-model="newUser.email" type="email" :placeholder="t('login.email')" required />
-          <input v-model="newUser.displayName" :placeholder="t('admin.displayName')" required />
-          <input v-model="newUser.password" type="password" :placeholder="t('admin.passwordPlaceholder')" required />
-          <select v-model="newUser.role" class="select-control">
-            <option value="member">{{ t('common.member') }}</option>
-            <option value="admin">{{ t('common.admin') }}</option>
-          </select>
-          <button class="primary-button" type="submit" :disabled="isBusy(createUserKey)">
-            <LoaderCircle v-if="isBusy(createUserKey)" class="spin" :size="17" />
-            <UserPlus v-else :size="17" />
-            {{ isBusy(createUserKey) ? t('common.creating') : t('admin.createUser') }}
-          </button>
-        </form>
-      </article>
-
-      <article class="admin-panel wide-panel">
-        <header>
-          <div>
-            <h2>{{ t('admin.usersTitle') }}</h2>
-            <p class="panel-note">{{ t('admin.usersNote') }}</p>
-          </div>
-          <small class="status-pill neutral">{{ formatCount(users.length, 'account') }}</small>
-        </header>
-        <div v-if="users.length" class="user-toolbar">
-          <label class="search-box user-search">
-            <Search :size="17" />
-            <input v-model="userSearch" :placeholder="t('admin.searchUsers')" />
-            <button v-if="userSearch" class="search-clear" type="button" :title="t('admin.clearUserSearch')" @click="userSearch = ''">
-              <X :size="15" />
+      <section class="admin-user-workspace wide-panel">
+        <article class="admin-panel create-user-panel">
+          <header>
+            <div>
+              <h2>{{ t('admin.createUserTitle') }}</h2>
+              <p class="panel-note">{{ t('admin.noUsersHint') }}</p>
+            </div>
+          </header>
+          <form class="stack-form create-user-form" @submit.prevent="createUser">
+            <input v-model="newUser.email" type="email" :placeholder="t('login.email')" required />
+            <input v-model="newUser.displayName" :placeholder="t('admin.displayName')" required />
+            <input v-model="newUser.password" type="password" :placeholder="t('admin.passwordPlaceholder')" required />
+            <select v-model="newUser.role" class="select-control">
+              <option value="member">{{ t('common.member') }}</option>
+              <option value="admin">{{ t('common.admin') }}</option>
+            </select>
+            <button class="primary-button" type="submit" :disabled="isBusy(createUserKey)">
+              <LoaderCircle v-if="isBusy(createUserKey)" class="spin" :size="17" />
+              <UserPlus v-else :size="17" />
+              {{ isBusy(createUserKey) ? t('common.creating') : t('admin.createUser') }}
             </button>
-          </label>
-          <div class="segmented-control user-filter" :aria-label="t('admin.filterUserStatus')">
-            <button :class="{ active: userStatusFilter === 'all' }" @click="userStatusFilter = 'all'">{{ t('admin.all') }}</button>
-            <button :class="{ active: userStatusFilter === 'active' }" @click="userStatusFilter = 'active'">{{ t('common.active') }}</button>
-            <button :class="{ active: userStatusFilter === 'disabled' }" @click="userStatusFilter = 'disabled'">{{ t('common.disabled') }}</button>
+          </form>
+        </article>
+
+        <article class="admin-panel users-panel">
+          <header>
+            <div>
+              <h2>{{ t('admin.usersTitle') }}</h2>
+              <p class="panel-note">{{ t('admin.usersNote') }}</p>
+            </div>
+            <small class="status-pill neutral">{{ formatCount(users.length, 'account') }}</small>
+          </header>
+          <div v-if="users.length" class="user-toolbar">
+            <label class="search-box user-search">
+              <Search :size="17" />
+              <input v-model="userSearch" :placeholder="t('admin.searchUsers')" />
+              <button v-if="userSearch" class="search-clear" type="button" :title="t('admin.clearUserSearch')" @click="userSearch = ''">
+                <X :size="15" />
+              </button>
+            </label>
+            <div class="segmented-control user-filter" :aria-label="t('admin.filterUserStatus')">
+              <button :class="{ active: userStatusFilter === 'all' }" @click="userStatusFilter = 'all'">{{ t('admin.all') }}</button>
+              <button :class="{ active: userStatusFilter === 'active' }" @click="userStatusFilter = 'active'">{{ t('common.active') }}</button>
+              <button :class="{ active: userStatusFilter === 'disabled' }" @click="userStatusFilter = 'disabled'">{{ t('common.disabled') }}</button>
+            </div>
+            <div class="segmented-control user-filter" :aria-label="t('admin.filterUserRole')">
+              <button :class="{ active: userRoleFilter === 'all' }" @click="userRoleFilter = 'all'">{{ t('admin.allRoles') }}</button>
+              <button :class="{ active: userRoleFilter === 'admin' }" @click="userRoleFilter = 'admin'">{{ t('admin.admins') }}</button>
+              <button :class="{ active: userRoleFilter === 'member' }" @click="userRoleFilter = 'member'">{{ t('admin.members') }}</button>
+            </div>
+            <small class="user-result-count">{{ userResultSummary }}</small>
           </div>
-          <div class="segmented-control user-filter" :aria-label="t('admin.filterUserRole')">
-            <button :class="{ active: userRoleFilter === 'all' }" @click="userRoleFilter = 'all'">{{ t('admin.allRoles') }}</button>
-            <button :class="{ active: userRoleFilter === 'admin' }" @click="userRoleFilter = 'admin'">{{ t('admin.admins') }}</button>
-            <button :class="{ active: userRoleFilter === 'member' }" @click="userRoleFilter = 'member'">{{ t('admin.members') }}</button>
+          <div v-if="!users.length" class="panel-empty">
+            <UserPlus :size="24" />
+            <strong>{{ t('admin.noUsersFound') }}</strong>
+            <span>{{ t('admin.noUsersHint') }}</span>
           </div>
-          <small class="user-result-count">{{ userResultSummary }}</small>
-        </div>
-        <div v-if="!users.length" class="panel-empty">
-          <UserPlus :size="24" />
-          <strong>{{ t('admin.noUsersFound') }}</strong>
-          <span>{{ t('admin.noUsersHint') }}</span>
-        </div>
-        <div v-else-if="!filteredUsers.length" class="panel-empty">
-          <Search :size="24" />
-          <strong>{{ t('admin.noMatchingUsers') }}</strong>
-          <span>{{ t('admin.noMatchingUsersHint') }}</span>
-          <button class="secondary-button" @click="resetUserFilters">
-            <X :size="17" />
-            {{ t('admin.clearFilters') }}
-          </button>
-        </div>
-        <div v-else class="user-table">
-          <div v-for="(user, userIndex) in filteredUsers" :key="user.id" class="user-card" :style="{ '--user-index': userIndex }">
-            <div class="user-main">
-              <div class="user-identity">
-                <span class="user-avatar" :class="{ off: !user.is_active }">{{ userInitials(user) }}</span>
-                <div class="user-title">
-                  <strong>{{ user.display_name }}</strong>
-                  <span>{{ user.email }}</span>
+          <div v-else-if="!filteredUsers.length" class="panel-empty">
+            <Search :size="24" />
+            <strong>{{ t('admin.noMatchingUsers') }}</strong>
+            <span>{{ t('admin.noMatchingUsersHint') }}</span>
+            <button class="secondary-button" @click="resetUserFilters">
+              <X :size="17" />
+              {{ t('admin.clearFilters') }}
+            </button>
+          </div>
+          <div v-else class="user-table">
+            <div v-for="(user, userIndex) in filteredUsers" :key="user.id" class="user-card" :style="{ '--user-index': userIndex }">
+              <div class="user-main">
+                <div class="user-identity">
+                  <span class="user-avatar" :class="{ off: !user.is_active }">{{ userInitials(user) }}</span>
+                  <div class="user-title">
+                    <strong>{{ user.display_name }}</strong>
+                    <span>{{ user.email }}</span>
+                  </div>
+                </div>
+                <div class="status-row">
+                  <small class="status-pill" :class="{ off: !user.is_active }">{{ user.is_active ? t('common.active') : t('common.disabled') }}</small>
+                  <small class="status-pill">{{ roleLabel(user.role) }}</small>
                 </div>
               </div>
-              <div class="status-row">
-                <small class="status-pill" :class="{ off: !user.is_active }">{{ user.is_active ? t('common.active') : t('common.disabled') }}</small>
-                <small class="status-pill">{{ roleLabel(user.role) }}</small>
-              </div>
-            </div>
-            <div class="user-controls">
-              <div class="user-fields">
-                <input v-model="editBuffer[user.id].display_name" :placeholder="t('admin.displayName')" />
-                <input v-model="editBuffer[user.id].email" type="email" :placeholder="t('login.email')" />
-                <select v-model="editBuffer[user.id].role" class="select-control">
-                  <option value="member">{{ t('common.member') }}</option>
-                  <option value="admin">{{ t('common.admin') }}</option>
-                </select>
-              </div>
-              <div class="user-action-row">
-                <button class="secondary-button" :disabled="isBusy(userSaveKey(user.id)) || !isUserChanged(user)" @click="saveUser(user)">
-                  <LoaderCircle v-if="isBusy(userSaveKey(user.id))" class="spin" :size="16" />
-                  <Save v-else :size="16" />
-                  {{ isBusy(userSaveKey(user.id)) ? t('common.saving') : isUserChanged(user) ? t('common.save') : t('common.saved') }}
-                </button>
-                <button class="secondary-button" :disabled="isBusy(passwordKey(user.id))" @click="openPasswordReset(user)">
-                  <LoaderCircle v-if="isBusy(passwordKey(user.id))" class="spin" :size="16" />
-                  <KeyRound v-else :size="16" />
-                  {{ t('common.password') }}
-                </button>
-                <button class="secondary-button" :disabled="isBusy(permissionLoadKey(user.id))" @click="openPermissions(user)">
-                  <LoaderCircle v-if="isBusy(permissionLoadKey(user.id))" class="spin" :size="16" />
-                  <ShieldCheck v-else :size="16" />
-                  {{ t('admin.userLibraries') }}
-                </button>
-                <button v-if="user.is_active" class="danger-button" :disabled="isBusy(userDisableKey(user.id))" @click="disableUser(user)">
-                  <LoaderCircle v-if="isBusy(userDisableKey(user.id))" class="spin" :size="16" />
-                  <UserX v-else :size="16" />
-                  {{ t('common.disable') }}
-                </button>
-                <button v-else class="secondary-button" :disabled="isBusy(userEnableKey(user.id))" @click="enableUser(user)">
-                  <LoaderCircle v-if="isBusy(userEnableKey(user.id))" class="spin" :size="16" />
-                  <UserCheck v-else :size="16" />
-                  {{ t('common.enable') }}
-                </button>
+              <div class="user-controls">
+                <div class="user-fields">
+                  <input v-model="editBuffer[user.id].display_name" :placeholder="t('admin.displayName')" />
+                  <input v-model="editBuffer[user.id].email" type="email" :placeholder="t('login.email')" />
+                  <select v-model="editBuffer[user.id].role" class="select-control">
+                    <option value="member">{{ t('common.member') }}</option>
+                    <option value="admin">{{ t('common.admin') }}</option>
+                  </select>
+                </div>
+                <div class="user-action-row">
+                  <button class="secondary-button" :disabled="isBusy(userSaveKey(user.id)) || !isUserChanged(user)" @click="saveUser(user)">
+                    <LoaderCircle v-if="isBusy(userSaveKey(user.id))" class="spin" :size="16" />
+                    <Save v-else :size="16" />
+                    {{ isBusy(userSaveKey(user.id)) ? t('common.saving') : isUserChanged(user) ? t('common.save') : t('common.saved') }}
+                  </button>
+                  <button class="secondary-button" :disabled="isBusy(passwordKey(user.id))" @click="openPasswordReset(user)">
+                    <LoaderCircle v-if="isBusy(passwordKey(user.id))" class="spin" :size="16" />
+                    <KeyRound v-else :size="16" />
+                    {{ t('common.password') }}
+                  </button>
+                  <button class="secondary-button" :disabled="isBusy(permissionLoadKey(user.id))" @click="openPermissions(user)">
+                    <LoaderCircle v-if="isBusy(permissionLoadKey(user.id))" class="spin" :size="16" />
+                    <ShieldCheck v-else :size="16" />
+                    {{ t('admin.userLibraries') }}
+                  </button>
+                  <button v-if="user.is_active" class="danger-button" :disabled="isBusy(userDisableKey(user.id))" @click="disableUser(user)">
+                    <LoaderCircle v-if="isBusy(userDisableKey(user.id))" class="spin" :size="16" />
+                    <UserX v-else :size="16" />
+                    {{ t('common.disable') }}
+                  </button>
+                  <button v-else class="secondary-button" :disabled="isBusy(userEnableKey(user.id))" @click="enableUser(user)">
+                    <LoaderCircle v-if="isBusy(userEnableKey(user.id))" class="spin" :size="16" />
+                    <UserCheck v-else :size="16" />
+                    {{ t('common.enable') }}
+                  </button>
+                </div>
               </div>
             </div>
           </div>
-        </div>
-      </article>
+        </article>
+      </section>
 
-      <div class="admin-grid-row">
-      <article class="admin-panel">
+      <div class="admin-grid-row admin-monitor-grid">
+      <article class="admin-panel monitor-panel">
         <header>
           <h2>{{ t('admin.scanJobs') }}</h2>
         </header>
@@ -311,7 +316,7 @@
         </template>
       </article>
 
-      <article class="admin-panel">
+      <article class="admin-panel monitor-panel">
         <header>
           <h2>{{ t('admin.shareLinks') }}</h2>
         </header>

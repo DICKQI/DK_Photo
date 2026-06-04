@@ -6,34 +6,38 @@
           <div class="brand-mark">DK</div>
           <strong>DK Photo</strong>
         </div>
-        <button class="sidebar-action" :class="{ active: !currentFolder && !favoritesView && !allPhotosView && !recentView && !videosView && !placesView && !currentPlace && !currentTag && !currentRating && !currentCamera && !currentLens && !currentAlbum && !albumOverviewView }" @click="goRoot">
-          <FolderRoot :size="18" />
-          {{ t('album.allLibraries') }}
-        </button>
-        <button class="sidebar-action" :class="{ active: allPhotosView }" @click="openAllPhotosView">
-          <Images :size="18" />
-          {{ t('album.allPhotos') }}
-        </button>
-        <button class="sidebar-action" :class="{ active: recentView }" @click="openRecentView">
-          <Clock :size="18" />
-          {{ t('album.recentlyAdded') }}
-        </button>
-        <button class="sidebar-action" :class="{ active: videosView }" @click="openVideosView">
-          <Video :size="18" />
-          {{ t('album.videos') }}
-        </button>
-        <button class="sidebar-action" :class="{ active: placesView }" @click="openPlacesView">
-          <MapPin :size="18" />
-          {{ t('album.places') }}
-        </button>
-        <button class="sidebar-action" :class="{ active: favoritesView }" @click="openFavoritesView">
-          <Star :size="18" />
-          {{ t('album.favorites') }}
-        </button>
-        <button class="sidebar-action" :class="{ active: albumOverviewView }" @click="openAlbumOverviewView">
-          <Images :size="18" />
-          {{ t('album.albums') }}
-        </button>
+        <div class="sidebar-nav-main">
+          <button class="sidebar-action sidebar-action-primary" :class="{ active: allPhotosView }" @click="openAllPhotosView">
+            <Images :size="18" />
+            <span class="sidebar-action-label">{{ t('album.allPhotos') }}</span>
+          </button>
+          <button class="sidebar-action sidebar-action-primary" :class="{ active: albumOverviewView }" @click="openAlbumOverviewView">
+            <Images :size="18" />
+            <span class="sidebar-action-label">{{ t('album.albums') }}</span>
+          </button>
+          <button class="sidebar-action sidebar-action-primary" :class="{ active: !currentFolder && !favoritesView && !allPhotosView && !recentView && !videosView && !placesView && !currentPlace && !currentTag && !currentRating && !currentCamera && !currentLens && !currentAlbum && !albumOverviewView }" @click="goRoot">
+            <FolderRoot :size="18" />
+            <span class="sidebar-action-label">{{ t('album.allLibraries') }}</span>
+          </button>
+        </div>
+        <div class="sidebar-nav-secondary" :aria-label="t('album.smartAlbum')">
+          <button class="sidebar-action sidebar-action-compact" :class="{ active: recentView }" @click="openRecentView">
+            <Clock :size="17" />
+            <span class="sidebar-action-label">{{ t('album.recentlyAdded') }}</span>
+          </button>
+          <button class="sidebar-action sidebar-action-compact" :class="{ active: videosView }" @click="openVideosView">
+            <Video :size="17" />
+            <span class="sidebar-action-label">{{ t('album.videos') }}</span>
+          </button>
+          <button class="sidebar-action sidebar-action-compact" :class="{ active: placesView }" @click="openPlacesView">
+            <MapPin :size="17" />
+            <span class="sidebar-action-label">{{ t('album.places') }}</span>
+          </button>
+          <button class="sidebar-action sidebar-action-compact" :class="{ active: favoritesView }" @click="openFavoritesView">
+            <Star :size="17" />
+            <span class="sidebar-action-label">{{ t('album.favorites') }}</span>
+          </button>
+        </div>
       </div>
 
       <div class="sidebar-scroll">
