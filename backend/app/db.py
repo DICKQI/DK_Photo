@@ -61,6 +61,15 @@ def run_lightweight_migrations() -> None:
     if "password_hash" not in share_columns:
         with engine.begin() as connection:
             connection.execute(text("ALTER TABLE sharelink ADD COLUMN password_hash VARCHAR"))
+    scanjob_columns = {column["name"] for column in inspector.get_columns("scanjob")} if inspector.has_table("scanjob") else set()
+    scanjob_migrations = {
+        "total_estimated": "ALTER TABLE scanjob ADD COLUMN total_estimated INTEGER",
+        "processed_assets": "ALTER TABLE scanjob ADD COLUMN processed_assets INTEGER NOT NULL DEFAULT 0",
+    }
+    with engine.begin() as connection:
+        for column, statement in scanjob_migrations.items():
+            if column not in scanjob_columns:
+                connection.execute(text(statement))
 
 
 def get_session() -> Generator[Session, None, None]:

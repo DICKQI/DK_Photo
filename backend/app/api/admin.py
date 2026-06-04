@@ -220,7 +220,7 @@ def _run_job_in_new_session(job_id: int) -> None:
     from app.db import engine
 
     with Session(engine) as session:
-        run_scan_job(session, job_id)
+        run_scan_job(session, job_id, generate_thumbnails=True)
 
 
 @router.get("/jobs", response_model=list[ScanJobRead])

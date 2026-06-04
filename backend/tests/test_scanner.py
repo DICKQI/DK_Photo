@@ -1,12 +1,22 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from PIL import ExifTags, Image, TiffImagePlugin
 from sqlmodel import Session, SQLModel, create_engine, select
 
-from app.models import Asset, Folder, LibraryRoot, ScanJob
-from app.services.scanner import is_supported_image, is_supported_media, is_supported_video, run_scan_job, scan_library
+from app.config import settings
+from app.models import Asset, Folder, LibraryRoot, ScanJob, Thumbnail
+from app.services.scanner import (
+    is_supported_image,
+    is_supported_media,
+    is_supported_video,
+    refresh_folder_counts,
+    run_scan_job,
+    scan_library,
+)
+from app.services.thumbnails import bulk_generate_thumbnails, thumbnail_cache_path
 
 
 EXIF_TAGS = {value: key for key, value in ExifTags.TAGS.items()}
@@ -142,3 +152,162 @@ def test_scan_job_reports_indexed_media_items(tmp_path: Path) -> None:
         assert updated.status == "completed"
         assert updated.total_assets == 2
         assert updated.message == "Indexed 2 media items"
+        assert updated.processed_assets == 2
+
+
+def test_scan_job_preserves_thumbnail_generation_message(tmp_path: Path) -> None:
+    old_data_dir = settings.data_dir
+    object.__setattr__(settings, "data_dir", (tmp_path / "data").resolve())
+    try:
+        photo_root = tmp_path / "thumb-job"
+        create_photo(photo_root / "one.jpg")
+
+        with make_session(tmp_path) as session:
+            library = LibraryRoot(name="Thumbnail Job", path=str(photo_root.resolve()))
+            session.add(library)
+            session.commit()
+            session.refresh(library)
+            job = ScanJob(library_id=library.id or 0, status="queued", message="Queued")
+            session.add(job)
+            session.commit()
+            session.refresh(job)
+
+            run_scan_job(session, job.id or 0, generate_thumbnails=True)
+
+            updated = session.get(ScanJob, job.id or 0)
+            assert updated is not None
+            assert updated.status == "completed"
+            assert updated.total_assets == 1
+            assert updated.message == "Indexed 1 media items, 1 thumbnails generated"
+    finally:
+        object.__setattr__(settings, "data_dir", old_data_dir)
+
+
+def test_bulk_generate_thumbnails_regenerates_stale_cache(tmp_path: Path) -> None:
+    old_data_dir = settings.data_dir
+    object.__setattr__(settings, "data_dir", (tmp_path / "data").resolve())
+    try:
+        photo_root = tmp_path / "stale-thumbnails"
+        photo_path = photo_root / "one.jpg"
+        create_photo(photo_path)
+
+        with make_session(tmp_path) as session:
+            library = LibraryRoot(name="Stale Thumbnails", path=str(photo_root.resolve()))
+            session.add(library)
+            session.commit()
+            session.refresh(library)
+
+            scan_library(session, library.id or 0)
+            asset = session.exec(select(Asset)).one()
+            assert bulk_generate_thumbnails(session, [asset.id or 0], max_workers=1) == 1
+            original_thumbnail = session.exec(select(Thumbnail)).one()
+            original_path = Path(original_thumbnail.path)
+            assert original_path.exists()
+
+            Image.new("RGB", (128, 96), "#ef8d5b").save(photo_path)
+            os.utime(photo_path, (asset.mtime + 10, asset.mtime + 10))
+            scan_library(session, library.id or 0)
+            updated_asset = session.exec(select(Asset)).one()
+            expected_path = thumbnail_cache_path(updated_asset, "small")
+            assert expected_path != original_path
+
+            assert bulk_generate_thumbnails(session, [updated_asset.id or 0], max_workers=1) == 1
+            updated_thumbnail = session.exec(select(Thumbnail)).one()
+            assert updated_thumbnail.path == str(expected_path)
+            assert expected_path.exists()
+            assert not original_path.exists()
+    finally:
+        object.__setattr__(settings, "data_dir", old_data_dir)
+
+
+def test_bulk_generate_thumbnails_counts_video_placeholders(tmp_path: Path) -> None:
+    old_data_dir = settings.data_dir
+    object.__setattr__(settings, "data_dir", (tmp_path / "data").resolve())
+    try:
+        photo_root = tmp_path / "video-thumbnails"
+        photo_root.mkdir()
+        (photo_root / "clip.mp4").write_bytes(b"video")
+
+        with make_session(tmp_path) as session:
+            library = LibraryRoot(name="Video Thumbnails", path=str(photo_root.resolve()))
+            session.add(library)
+            session.commit()
+            session.refresh(library)
+            folder = Folder(library_id=library.id or 0, path="", name="Video Thumbnails")
+            session.add(folder)
+            session.commit()
+            session.refresh(folder)
+            asset = Asset(
+                library_id=library.id or 0,
+                folder_id=folder.id or 0,
+                filename="clip.mp4",
+                path="clip.mp4",
+                mime_type="video/mp4",
+                mtime=1,
+            )
+            session.add(asset)
+            session.commit()
+            session.refresh(asset)
+
+            assert bulk_generate_thumbnails(session, [asset.id or 0], max_workers=1) == 1
+            thumbnail = session.exec(select(Thumbnail)).one()
+            assert Path(thumbnail.path).exists()
+            assert thumbnail.width == 320
+            assert thumbnail.height == 320
+    finally:
+        object.__setattr__(settings, "data_dir", old_data_dir)
+
+
+def test_refresh_folder_counts_uses_latest_mtime_for_cover(tmp_path: Path) -> None:
+    with make_session(tmp_path) as session:
+        library = LibraryRoot(name="Cover Library", path=str((tmp_path / "photos").resolve()))
+        session.add(library)
+        session.commit()
+        session.refresh(library)
+
+        folder = Folder(library_id=library.id or 0, path="", name="Cover Library")
+        session.add(folder)
+        session.commit()
+        session.refresh(folder)
+
+        latest_asset = Asset(
+            library_id=library.id or 0,
+            folder_id=folder.id or 0,
+            filename="latest.jpg",
+            path="latest.jpg",
+            mime_type="image/jpeg",
+            mtime=200,
+        )
+        older_asset = Asset(
+            library_id=library.id or 0,
+            folder_id=folder.id or 0,
+            filename="older.jpg",
+            path="older.jpg",
+            mime_type="image/jpeg",
+            mtime=100,
+        )
+        session.add(latest_asset)
+        session.commit()
+        session.refresh(latest_asset)
+        session.add(older_asset)
+        session.commit()
+        session.refresh(older_asset)
+
+        refresh_folder_counts(session, library)
+        session.refresh(folder)
+        assert latest_asset.id is not None
+        assert older_asset.id is not None
+        assert older_asset.id > latest_asset.id
+        assert folder.cover_asset_id == latest_asset.id
+
+        session.delete(latest_asset)
+        session.commit()
+        refresh_folder_counts(session, library)
+        session.refresh(folder)
+        assert folder.cover_asset_id == older_asset.id
+
+        session.delete(older_asset)
+        session.commit()
+        refresh_folder_counts(session, library)
+        session.refresh(folder)
+        assert folder.cover_asset_id is None

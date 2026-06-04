@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from PIL import ExifTags, Image, ImageOps, UnidentifiedImageError
+from sqlalchemy import delete as sa_delete
 from sqlalchemy import func
 from sqlmodel import Session, select
 
@@ -16,6 +17,9 @@ from app.models import Asset, Folder, LibraryRoot, PhotoAlbum, PhotoAlbumAsset, 
 SUPPORTED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 SUPPORTED_VIDEO_EXTENSIONS = {".mp4", ".mov", ".m4v", ".webm", ".avi", ".mkv"}
 SUPPORTED_EXTENSIONS = SUPPORTED_IMAGE_EXTENSIONS | SUPPORTED_VIDEO_EXTENSIONS
+
+BATCH_SIZE = 200
+PROGRESS_INTERVAL = 100
 
 
 def is_supported_image(path: Path) -> bool:
@@ -225,8 +229,7 @@ def get_or_create_folder(
     else:
         folder = Folder(library_id=library.id or 0, parent_id=parent_id, path=rel_path, name=name)
         session.add(folder)
-        session.commit()
-        session.refresh(folder)
+        session.flush()
     cache[rel_path] = folder
     return folder
 
@@ -274,8 +277,7 @@ def upsert_asset(session: Session, library: LibraryRoot, folder: Folder, media_p
             **metadata,
         )
         session.add(asset)
-    session.commit()
-    session.refresh(asset)
+    session.flush()
     return asset
 
 
@@ -286,50 +288,82 @@ def apply_asset_metadata(asset: Asset, metadata: dict[str, Any]) -> None:
 
 def delete_missing_assets(session: Session, library: LibraryRoot, seen_asset_paths: set[str]) -> None:
     assets = session.exec(select(Asset).where(Asset.library_id == library.id)).all()
-    for asset in assets:
-        if asset.path in seen_asset_paths:
-            continue
-        thumbnails = session.exec(select(Thumbnail).where(Thumbnail.asset_id == asset.id)).all()
-        for thumbnail in thumbnails:
-            thumb_path = Path(thumbnail.path)
-            if thumb_path.exists():
-                thumb_path.unlink(missing_ok=True)
-            session.delete(thumbnail)
-        album_assets = session.exec(select(PhotoAlbumAsset).where(PhotoAlbumAsset.asset_id == asset.id)).all()
-        for album_asset in album_assets:
-            session.delete(album_asset)
-        cover_albums = session.exec(select(PhotoAlbum).where(PhotoAlbum.cover_asset_id == asset.id)).all()
-        for album in cover_albums:
-            album.cover_asset_id = None
-        session.delete(asset)
+    stale_ids = [a.id for a in assets if a.path not in seen_asset_paths and a.id is not None]
+
+    if not stale_ids:
+        return
+
+    thumbnails = session.exec(select(Thumbnail).where(Thumbnail.asset_id.in_(stale_ids))).all()  # type: ignore[attr-defined]
+    for thumbnail in thumbnails:
+        thumb_path = Path(thumbnail.path)
+        if thumb_path.exists():
+            thumb_path.unlink(missing_ok=True)
+
+    session.exec(sa_delete(Thumbnail).where(Thumbnail.asset_id.in_(stale_ids)))  # type: ignore[attr-defined]
+    session.exec(sa_delete(PhotoAlbumAsset).where(PhotoAlbumAsset.asset_id.in_(stale_ids)))  # type: ignore[attr-defined]
+
+    cover_albums = session.exec(select(PhotoAlbum).where(PhotoAlbum.cover_asset_id.in_(stale_ids))).all()  # type: ignore[attr-defined]
+    for album in cover_albums:
+        album.cover_asset_id = None
+
+    cover_folders = session.exec(select(Folder).where(Folder.cover_asset_id.in_(stale_ids))).all()  # type: ignore[attr-defined]
+    for folder in cover_folders:
+        folder.cover_asset_id = None
+    session.flush()
+
+    session.exec(sa_delete(Asset).where(Asset.id.in_(stale_ids)))  # type: ignore[attr-defined]
     session.commit()
 
 
 def delete_missing_folders(session: Session, library: LibraryRoot, seen_folder_paths: set[str]) -> None:
     folders = session.exec(select(Folder).where(Folder.library_id == library.id)).all()
-    folders.sort(key=lambda folder: folder.path.count("/"), reverse=True)
-    for folder in folders:
-        if folder.path not in seen_folder_paths:
-            session.delete(folder)
+    stale_ids = [f.id for f in folders if f.path not in seen_folder_paths and f.id is not None]
+    if stale_ids:
+        session.exec(sa_delete(Folder).where(Folder.id.in_(stale_ids)))  # type: ignore[attr-defined]
     session.commit()
 
 
 def refresh_folder_counts(session: Session, library: LibraryRoot) -> None:
     folders = session.exec(select(Folder).where(Folder.library_id == library.id)).all()
+    if not folders:
+        return
+
+    folder_ids = [f.id for f in folders if f.id is not None]
+
+    photo_counts = session.exec(
+        select(Asset.folder_id, func.count(Asset.id))
+        .where(Asset.folder_id.in_(folder_ids))  # type: ignore[attr-defined]
+        .group_by(Asset.folder_id)
+    ).all()
+    photo_count_map = {folder_id: cnt for folder_id, cnt in photo_counts}
+
+    subfolder_counts = session.exec(
+        select(Folder.parent_id, func.count(Folder.id))
+        .where(Folder.parent_id.in_(folder_ids))  # type: ignore[attr-defined]
+        .group_by(Folder.parent_id)
+    ).all()
+    subfolder_count_map = {parent_id: cnt for parent_id, cnt in subfolder_counts}
+
+    latest_asset_rows = session.exec(
+        select(Asset.folder_id, Asset.id)
+        .where(Asset.folder_id.in_(folder_ids))  # type: ignore[attr-defined]
+        .order_by(Asset.folder_id, Asset.mtime.desc(), Asset.id.desc())
+    ).all()
+    cover_map: dict[int, int] = {}
+    for folder_id, asset_id in latest_asset_rows:
+        if folder_id is not None and asset_id is not None and folder_id not in cover_map:
+            cover_map[folder_id] = asset_id
+
     for folder in folders:
-        folder.photo_count = session.exec(
-            select(func.count()).select_from(Asset).where(Asset.folder_id == folder.id)
-        ).one()
-        folder.folder_count = session.exec(
-            select(func.count()).select_from(Folder).where(Folder.parent_id == folder.id)
-        ).one()
-        cover = session.exec(select(Asset).where(Asset.folder_id == folder.id).order_by(Asset.mtime.desc())).first()
-        folder.cover_asset_id = cover.id if cover else folder.cover_asset_id
+        folder.photo_count = photo_count_map.get(folder.id, 0)
+        folder.folder_count = subfolder_count_map.get(folder.id, 0)
+        folder.cover_asset_id = cover_map.get(folder.id)
         folder.updated_at = utc_now()
+
     session.commit()
 
 
-def scan_library(session: Session, library_id: int) -> int:
+def scan_library(session: Session, library_id: int, job: ScanJob | None = None, generate_thumbnails: bool = False) -> int:
     library = session.get(LibraryRoot, library_id)
     if not library or not library.is_enabled:
         return 0
@@ -354,23 +388,54 @@ def scan_library(session: Session, library_id: int) -> int:
             seen_asset_paths.add(asset.path)
             total += 1
 
+            if job and total % PROGRESS_INTERVAL == 0:
+                job.processed_assets = total
+                session.add(job)
+                session.commit()
+            elif total % BATCH_SIZE == 0:
+                session.commit()
+
+    if job:
+        job.processed_assets = total
+        session.add(job)
+    session.commit()
+
     delete_missing_assets(session, library, seen_asset_paths)
     delete_missing_folders(session, library, seen_folder_paths)
     refresh_folder_counts(session, library)
     library.last_scan_at = utc_now()
     session.commit()
+
+    if generate_thumbnails and total > 0:
+        image_assets = session.exec(
+            select(Asset).where(
+                Asset.library_id == library_id,
+                Asset.mime_type.like("image/%"),
+            )
+        ).all()
+        if image_assets:
+            from app.services.thumbnails import bulk_generate_thumbnails
+
+            thumb_count = bulk_generate_thumbnails(session, [a.id for a in image_assets if a.id is not None])
+            if job:
+                job.message = f"Indexed {total} media items, {thumb_count} thumbnails generated"
+                session.add(job)
+                session.commit()
+
     return total
 
 
-def run_scan_job(session: Session, job_id: int) -> None:
+def run_scan_job(session: Session, job_id: int, generate_thumbnails: bool = False) -> None:
     job = session.get(ScanJob, job_id)
     if not job:
         return
     job.status = "running"
     job.started_at = datetime.utcnow()
+    job.total_estimated = None
+    job.processed_assets = 0
     session.commit()
     try:
-        total = scan_library(session, job.library_id)
+        total = scan_library(session, job.library_id, job=job, generate_thumbnails=generate_thumbnails)
     except Exception as exc:  # pragma: no cover - defensive status reporting
         job.status = "failed"
         job.message = str(exc)
@@ -379,6 +444,7 @@ def run_scan_job(session: Session, job_id: int) -> None:
         raise
     job.status = "completed"
     job.total_assets = total
-    job.message = f"Indexed {total} media items"
+    if "thumbnails generated" not in job.message:
+        job.message = f"Indexed {total} media items"
     job.finished_at = datetime.utcnow()
     session.commit()

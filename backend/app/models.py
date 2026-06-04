@@ -170,5 +170,7 @@ class ScanJob(SQLModel, table=True):
     status: str = Field(default="queued", index=True)
     message: str = ""
     total_assets: int = 0
+    total_estimated: Optional[int] = Field(default=None)
+    processed_assets: int = Field(default=0)
     started_at: Optional[datetime] = None
     finished_at: Optional[datetime] = None

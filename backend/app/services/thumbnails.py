@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import concurrent.futures
 import hashlib
 from pathlib import Path
 
@@ -16,6 +17,8 @@ THUMBNAIL_SIZES: dict[str, tuple[int, int]] = {
     "medium": (720, 720),
     "large": (1440, 1440),
 }
+
+DEFAULT_THUMB_WORKERS = 4
 
 
 def thumbnail_cache_path(asset: Asset, size: str) -> Path:
@@ -108,3 +111,129 @@ def write_video_placeholder(output_path: Path, max_size: tuple[int, int]) -> tup
     draw.polygon(points, fill=accent)
     image.save(output_path, "WEBP", quality=82, method=4)
     return image.size
+
+
+def _generate_thumbnail_file(
+    original_path: Path, output_path: Path, max_size: tuple[int, int]
+) -> tuple[int, int] | None:
+    try:
+        with Image.open(original_path) as image:
+            image = ImageOps.exif_transpose(image)
+            if getattr(image, "is_animated", False):
+                image.seek(0)
+            image.thumbnail(max_size, Image.Resampling.LANCZOS)
+            if image.mode not in {"RGB", "RGBA"}:
+                image = image.convert("RGB")
+            image.save(output_path, "WEBP", quality=82, method=4)
+            return image.size
+    except Exception:
+        try:
+            output_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        return None
+
+
+def bulk_generate_thumbnails(
+    session: Session,
+    asset_ids: list[int],
+    size: str = "small",
+    max_workers: int = DEFAULT_THUMB_WORKERS,
+) -> int:
+    if size not in THUMBNAIL_SIZES:
+        size = "small"
+    if not asset_ids:
+        return 0
+    asset_ids = list(dict.fromkeys(asset_ids))
+    max_workers = max(1, max_workers)
+
+    max_size = THUMBNAIL_SIZES[size]
+
+    assets = session.exec(select(Asset).where(Asset.id.in_(asset_ids))).all()  # type: ignore[attr-defined]
+
+    existing_thumbnails = session.exec(
+        select(Thumbnail).where(
+            Thumbnail.asset_id.in_(asset_ids),  # type: ignore[attr-defined]
+            Thumbnail.size == size,
+        )
+    ).all()
+    existing_by_asset_id = {thumbnail.asset_id: thumbnail for thumbnail in existing_thumbnails}
+
+    work_items: list[tuple[Asset, Path, Path]] = []
+    generated_count = 0
+    for asset in assets:
+        asset_id = asset.id or 0
+        output_path = thumbnail_cache_path(asset, size)
+        existing = existing_by_asset_id.get(asset_id)
+        if existing and existing.path == str(output_path) and output_path.exists():
+            continue
+        library = session.get(LibraryRoot, asset.library_id)
+        if not library:
+            continue
+        original_path = safe_asset_path(library.path, asset.path)
+        if not original_path.exists():
+            continue
+        if asset.mime_type.startswith("video/"):
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            width, height = write_video_placeholder(output_path, max_size)
+            if existing:
+                _delete_old_thumbnail(existing, output_path)
+                existing.path = str(output_path)
+                existing.width = width
+                existing.height = height
+            else:
+                session.add(
+                    Thumbnail(
+                        asset_id=asset_id,
+                        size=size,
+                        path=str(output_path),
+                        width=width,
+                        height=height,
+                    )
+                )
+            generated_count += 1
+        else:
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            work_items.append((asset, original_path, output_path))
+
+    if not work_items:
+        session.commit()
+        return generated_count
+
+    results: list[tuple[Asset, Path, int, int]] = []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_item: dict[concurrent.futures.Future, tuple[Asset, Path, Path]] = {
+            executor.submit(_generate_thumbnail_file, item[1], item[2], max_size): item
+            for item in work_items
+        }
+        for future in concurrent.futures.as_completed(future_to_item):
+            asset_item = future_to_item[future]
+            try:
+                dims = future.result()
+                if dims:
+                    results.append((asset_item[0], asset_item[2], dims[0], dims[1]))
+            except Exception:
+                pass
+
+    for asset, output_path, width, height in results:
+        existing = session.exec(
+            select(Thumbnail).where(Thumbnail.asset_id == asset.id, Thumbnail.size == size)
+        ).first()
+        if existing:
+            _delete_old_thumbnail(existing, output_path)
+            existing.path = str(output_path)
+            existing.width = width
+            existing.height = height
+        else:
+            session.add(
+                Thumbnail(
+                    asset_id=asset.id or 0,
+                    size=size,
+                    path=str(output_path),
+                    width=width,
+                    height=height,
+                )
+            )
+
+    session.commit()
+    return generated_count + len(results)

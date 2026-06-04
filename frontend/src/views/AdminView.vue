@@ -717,6 +717,7 @@ function syncEditBuffer() {
 
 function selectDirectory(path: string) {
   libraryPath.value = path;
+  libraryName.value = path.replace(/\\/g, '/').split('/').filter(Boolean).pop() || '';
   showDirectoryPicker.value = false;
 }
 

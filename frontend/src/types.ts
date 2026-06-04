@@ -111,6 +111,8 @@ export interface ScanJob {
   status: string;
   message: string;
   total_assets: number;
+  total_estimated: number | null;
+  processed_assets: number;
   started_at: string | null;
   finished_at: string | null;
 }

@@ -190,6 +190,8 @@ class ScanJobRead(BaseModel):
     status: str
     message: str
     total_assets: int
+    total_estimated: Optional[int] = None
+    processed_assets: int = 0
     started_at: Optional[datetime]
     finished_at: Optional[datetime]
 

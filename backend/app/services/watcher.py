@@ -23,7 +23,7 @@ class DebouncedScanHandler(FileSystemEventHandler):
             self.schedule_scan(self.library_id)
             return
         suffix = Path(event.src_path).suffix.lower()
-        if suffix in {".jpg", ".jpeg", ".png", ".webp", ".gif"}:
+        if suffix in {".jpg", ".jpeg", ".png", ".webp", ".gif", ".mp4", ".mov", ".m4v", ".webm", ".avi", ".mkv"}:
             self.schedule_scan(self.library_id)
 
 
