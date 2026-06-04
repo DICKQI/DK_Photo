@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import mimetypes
+import threading
 from datetime import datetime
 from fractions import Fraction
 from pathlib import Path
@@ -23,6 +24,46 @@ PROGRESS_INTERVAL = 100
 ACTIVE_SCAN_STATUSES = {"queued", "running"}
 
 
+class ScanCancelled(Exception):
+    pass
+
+
+_cancel_events: dict[int, threading.Event] = {}
+_cancel_lock = threading.Lock()
+
+
+def request_cancel_scan_job(job_id: int) -> bool:
+    with _cancel_lock:
+        event = _cancel_events.get(job_id)
+    if event:
+        event.set()
+        return True
+    return False
+
+
+def _check_cancelled(cancel_event: threading.Event | None) -> None:
+    if cancel_event and cancel_event.is_set():
+        raise ScanCancelled
+
+
+def _mark_job_cancelled(session: Session, job: ScanJob, total: int, message: str) -> None:
+    job.status = "cancelled"
+    job.total_assets = total
+    job.processed_assets = total
+    job.message = message
+    job.finished_at = datetime.utcnow()
+    session.add(job)
+    session.commit()
+
+
+def active_scan_job(session: Session, library_id: int) -> ScanJob | None:
+    return session.exec(
+        select(ScanJob)
+        .where(ScanJob.library_id == library_id, ScanJob.status.in_(ACTIVE_SCAN_STATUSES))  # type: ignore[attr-defined]
+        .order_by(ScanJob.id.desc())
+    ).first()
+
+
 def is_supported_image(path: Path) -> bool:
     return path.suffix.lower() in SUPPORTED_IMAGE_EXTENSIONS
 
@@ -33,14 +74,6 @@ def is_supported_video(path: Path) -> bool:
 
 def is_supported_media(path: Path) -> bool:
     return path.suffix.lower() in SUPPORTED_EXTENSIONS
-
-
-def active_scan_job(session: Session, library_id: int) -> ScanJob | None:
-    return session.exec(
-        select(ScanJob)
-        .where(ScanJob.library_id == library_id, ScanJob.status.in_(ACTIVE_SCAN_STATUSES))  # type: ignore[attr-defined]
-        .order_by(ScanJob.id.desc())
-    ).first()
 
 
 def relative_posix(path: Path, root: Path) -> str:
@@ -363,16 +396,45 @@ def refresh_folder_counts(session: Session, library: LibraryRoot) -> None:
         if folder_id is not None and asset_id is not None and folder_id not in cover_map:
             cover_map[folder_id] = asset_id
 
+    folder_path_by_id = {folder.id: folder.path for folder in folders if folder.id is not None}
+    current_cover_ids = [folder.cover_asset_id for folder in folders if folder.cover_asset_id is not None]
+    current_cover_rows = (
+        session.exec(
+            select(Asset.id, Asset.folder_id).where(
+                Asset.library_id == library.id,
+                Asset.id.in_(current_cover_ids),  # type: ignore[attr-defined]
+            )
+        ).all()
+        if current_cover_ids
+        else []
+    )
+    current_cover_folder_paths = {
+        asset_id: folder_path_by_id.get(folder_id)
+        for asset_id, folder_id in current_cover_rows
+    }
+
     for folder in folders:
         folder.photo_count = photo_count_map.get(folder.id, 0)
         folder.folder_count = subfolder_count_map.get(folder.id, 0)
-        folder.cover_asset_id = cover_map.get(folder.id)
+        current_cover_path = current_cover_folder_paths.get(folder.cover_asset_id)
+        if current_cover_path is None or not folder_path_contains(folder.path, current_cover_path):
+            folder.cover_asset_id = cover_map.get(folder.id)
         folder.updated_at = utc_now()
 
     session.commit()
 
 
-def scan_library(session: Session, library_id: int, job: ScanJob | None = None, generate_thumbnails: bool = False) -> int:
+def folder_path_contains(parent_path: str, child_path: str) -> bool:
+    return parent_path == "" or child_path == parent_path or child_path.startswith(f"{parent_path}/")
+
+
+def scan_library(
+    session: Session,
+    library_id: int,
+    job: ScanJob | None = None,
+    generate_thumbnails: bool = False,
+    cancel_event: threading.Event | None = None,
+) -> int:
     library = session.get(LibraryRoot, library_id)
     if not library or not library.is_enabled:
         return 0
@@ -385,29 +447,44 @@ def scan_library(session: Session, library_id: int, job: ScanJob | None = None, 
     seen_asset_paths: set[str] = set()
     total = 0
 
-    for directory, subdirs, filenames in root.walk():
-        subdirs[:] = [name for name in subdirs if not name.startswith(".")]
-        folder = get_or_create_folder(session, library, directory, root, folder_cache)
-        seen_folder_paths.add(folder.path)
-        for filename in filenames:
-            media_path = directory / filename
-            if not is_supported_media(media_path):
-                continue
-            asset = upsert_asset(session, library, folder, media_path, root)
-            seen_asset_paths.add(asset.path)
-            total += 1
+    try:
+        for directory, subdirs, filenames in root.walk():
+            subdirs[:] = [name for name in subdirs if not name.startswith(".")]
+            _check_cancelled(cancel_event)
 
-            if job and total % PROGRESS_INTERVAL == 0:
-                job.processed_assets = total
-                session.add(job)
-                session.commit()
-            elif total % BATCH_SIZE == 0:
-                session.commit()
+            folder = get_or_create_folder(session, library, directory, root, folder_cache)
+            seen_folder_paths.add(folder.path)
+            for filename in filenames:
+                _check_cancelled(cancel_event)
+
+                media_path = directory / filename
+                if not is_supported_media(media_path):
+                    continue
+                asset = upsert_asset(session, library, folder, media_path, root)
+                seen_asset_paths.add(asset.path)
+                total += 1
+
+                if job and total % PROGRESS_INTERVAL == 0:
+                    job.processed_assets = total
+                    session.add(job)
+                    session.commit()
+                elif total % BATCH_SIZE == 0:
+                    session.commit()
+
+        session.commit()
+
+    except ScanCancelled:
+        session.commit()
+
+        if job:
+            _mark_job_cancelled(session, job, total, f"Scan cancelled after {total} items")
+
+        return total
 
     if job:
         job.processed_assets = total
         session.add(job)
-    session.commit()
+        session.commit()
 
     delete_missing_assets(session, library, seen_asset_paths)
     delete_missing_folders(session, library, seen_folder_paths)
@@ -416,44 +493,83 @@ def scan_library(session: Session, library_id: int, job: ScanJob | None = None, 
     session.commit()
 
     if generate_thumbnails and total > 0:
-        image_assets = session.exec(
-            select(Asset).where(
-                Asset.library_id == library_id,
-                Asset.mime_type.like("image/%"),
-            )
-        ).all()
-        if image_assets:
-            from app.services.thumbnails import bulk_generate_thumbnails
+        try:
+            _check_cancelled(cancel_event)
 
-            thumb_count = bulk_generate_thumbnails(session, [a.id for a in image_assets if a.id is not None])
+            image_assets = session.exec(
+                select(Asset).where(
+                    Asset.library_id == library_id,
+                    Asset.mime_type.like("image/%"),
+                )
+            ).all()
+            if image_assets:
+                from app.services.thumbnails import bulk_generate_thumbnails
+
+                thumb_count = bulk_generate_thumbnails(
+                    session,
+                    [a.id for a in image_assets if a.id is not None],
+                    cancel_event=cancel_event,
+                )
+                if job:
+                    job.message = f"Indexed {total} media items, {thumb_count} thumbnails generated"
+                    session.add(job)
+                    session.commit()
+        except ScanCancelled:
             if job:
-                job.message = f"Indexed {total} media items, {thumb_count} thumbnails generated"
-                session.add(job)
-                session.commit()
+                _mark_job_cancelled(
+                    session,
+                    job,
+                    total,
+                    f"Indexed {total} media items (thumbnail generation cancelled)",
+                )
 
     return total
 
 
 def run_scan_job(session: Session, job_id: int, generate_thumbnails: bool = False) -> None:
+    cancel_event = threading.Event()
+    with _cancel_lock:
+        _cancel_events[job_id] = cancel_event
+
     job = session.get(ScanJob, job_id)
     if not job:
+        with _cancel_lock:
+            _cancel_events.pop(job_id, None)
         return
-    job.status = "running"
-    job.started_at = datetime.utcnow()
-    job.total_estimated = None
-    job.processed_assets = 0
-    session.commit()
+
     try:
-        total = scan_library(session, job.library_id, job=job, generate_thumbnails=generate_thumbnails)
+        session.refresh(job)
+        if job.status == "cancelled":
+            return
+        if cancel_event.is_set():
+            _mark_job_cancelled(session, job, 0, "Scan cancelled before start")
+            return
+
+        job.status = "running"
+        job.started_at = datetime.utcnow()
+        job.total_estimated = None
+        job.processed_assets = 0
+        session.commit()
+
+        total = scan_library(
+            session, job.library_id, job=job, generate_thumbnails=generate_thumbnails, cancel_event=cancel_event
+        )
+    except ScanCancelled:
+        return
     except Exception as exc:  # pragma: no cover - defensive status reporting
         job.status = "failed"
         job.message = str(exc)
         job.finished_at = datetime.utcnow()
         session.commit()
         raise
-    job.status = "completed"
-    job.total_assets = total
-    if "thumbnails generated" not in job.message:
-        job.message = f"Indexed {total} media items"
-    job.finished_at = datetime.utcnow()
+    finally:
+        with _cancel_lock:
+            _cancel_events.pop(job_id, None)
+
+    if job.status == "running":
+        job.status = "completed"
+        job.total_assets = total
+        if "thumbnails generated" not in job.message:
+            job.message = f"Indexed {total} media items"
+        job.finished_at = datetime.utcnow()
     session.commit()

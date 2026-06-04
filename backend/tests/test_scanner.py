@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import threading
 from pathlib import Path
 
 from PIL import ExifTags, Image, TiffImagePlugin
@@ -199,6 +200,72 @@ def test_mark_interrupted_scan_jobs_clears_startup_leftovers(tmp_path: Path) -> 
         assert jobs[0].message == "Interrupted by server restart"
         assert jobs[1].finished_at is not None
         assert jobs[2].message == "Done"
+
+
+def test_cancelled_scan_does_not_delete_unvisited_assets(tmp_path: Path) -> None:
+    photo_root = tmp_path / "cancel-no-delete"
+    create_photo(photo_root / "one.jpg")
+    create_photo(photo_root / "two.jpg")
+
+    with make_session(tmp_path) as session:
+        library = LibraryRoot(name="Cancel No Delete", path=str(photo_root.resolve()))
+        session.add(library)
+        session.commit()
+        session.refresh(library)
+        assert scan_library(session, library.id or 0) == 2
+
+        job = ScanJob(library_id=library.id or 0, status="running", message="Running")
+        session.add(job)
+        session.commit()
+        session.refresh(job)
+        cancel_event = threading.Event()
+        cancel_event.set()
+
+        assert scan_library(session, library.id or 0, job=job, cancel_event=cancel_event) == 0
+
+        updated = session.get(ScanJob, job.id or 0)
+        assert updated is not None
+        assert updated.status == "cancelled"
+        assert updated.message == "Scan cancelled after 0 items"
+        assert {asset.path for asset in session.exec(select(Asset)).all()} == {"one.jpg", "two.jpg"}
+
+
+def test_cancelled_thumbnail_generation_marks_job_cancelled(tmp_path: Path) -> None:
+    class CancelBeforeThumbnails:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def is_set(self) -> bool:
+            self.calls += 1
+            return self.calls >= 3
+
+    photo_root = tmp_path / "cancel-thumbnails"
+    create_photo(photo_root / "one.jpg")
+
+    with make_session(tmp_path) as session:
+        library = LibraryRoot(name="Cancel Thumbnails", path=str(photo_root.resolve()))
+        session.add(library)
+        session.commit()
+        session.refresh(library)
+        job = ScanJob(library_id=library.id or 0, status="running", message="Running")
+        session.add(job)
+        session.commit()
+        session.refresh(job)
+
+        total = scan_library(
+            session,
+            library.id or 0,
+            job=job,
+            generate_thumbnails=True,
+            cancel_event=CancelBeforeThumbnails(),  # type: ignore[arg-type]
+        )
+
+        updated = session.get(ScanJob, job.id or 0)
+        assert total == 1
+        assert updated is not None
+        assert updated.status == "cancelled"
+        assert updated.total_assets == 1
+        assert updated.message == "Indexed 1 media items (thumbnail generation cancelled)"
 
 
 def test_scan_job_preserves_thumbnail_generation_message(tmp_path: Path) -> None:

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, status
@@ -46,7 +46,7 @@ from app.security import hash_password
 from app.api.shares import share_read
 from app.services.filesystem import list_children, list_roots
 from app.services.paths import resolve_library_path
-from app.services.scanner import active_scan_job, run_scan_job
+from app.services.scanner import active_scan_job, request_cancel_scan_job, run_scan_job
 
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
@@ -229,6 +229,34 @@ def _run_job_in_new_session(job_id: int) -> None:
 @router.get("/jobs", response_model=list[ScanJobRead])
 def list_jobs(session: SessionDep, _: AdminUser) -> list[ScanJob]:
     return session.exec(select(ScanJob).order_by(ScanJob.id.desc()).limit(40)).all()
+
+
+@router.post("/jobs/{job_id}/cancel")
+def cancel_scan_job(job_id: int, session: SessionDep, _: AdminUser) -> dict:
+    job = session.get(ScanJob, job_id)
+    if not job:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scan job not found")
+    if job.status not in ("queued", "running"):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Cannot cancel scan job with status '{job.status}'",
+        )
+
+    if job.status == "queued":
+        request_cancel_scan_job(job_id)
+        job.status = "cancelled"
+        job.message = "Scan cancelled before start"
+        job.finished_at = datetime.utcnow()
+        session.commit()
+        return {"ok": True}
+
+    ok = request_cancel_scan_job(job_id)
+    if not ok:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Could not cancel the running scan (job may be in a different process)",
+        )
+    return {"ok": True}
 
 
 def managed_user(session: Session, user_id: int) -> User:

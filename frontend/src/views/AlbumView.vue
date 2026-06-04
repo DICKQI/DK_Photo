@@ -630,7 +630,7 @@
               {{ sortDirection === 'asc' ? t('common.sortAsc') : t('common.sortDesc') }}
             </button>
           </div>
-          <div v-if="!albumOverviewView" class="segmented-control" :aria-label="t('album.thumbnailSize')">
+          <div v-if="!albumOverviewView" class="segmented-control thumbnail-size-control" :aria-label="t('album.thumbnailSize')">
             <button :class="{ active: thumbSize === 'small' }" :title="t('album.compactThumbnails')" @click="setThumbSize('small')">
               <Grid2X2 :size="16" />
               {{ t('common.compact') }}
@@ -1627,27 +1627,65 @@
               <X :size="18" />
             </button>
           </div>
-          <div v-if="coverPickerLoading" class="cover-picker-loading">
-            <LoaderCircle class="spin" :size="28" />
-            <span>{{ t('album.loadingPhotos') }}</span>
+          <div class="cover-picker-path">
+            <template v-for="(folder, index) in coverPickerTrail" :key="folder.id">
+              <ChevronRight v-if="index > 0" :size="14" />
+              <button
+                type="button"
+                :class="{ active: folder.id === coverPickerCurrentFolder?.id }"
+                :disabled="folder.id === coverPickerCurrentFolder?.id || coverPickerLoading"
+                @click="loadCoverPickerFolder(folder.id)"
+              >
+                {{ folder.name }}
+              </button>
+            </template>
           </div>
-          <div v-else-if="!coverPickerAssets.length" class="cover-picker-empty">
-            <ImageOff :size="32" />
-            <span>{{ t('album.noPhotosHere') }}</span>
-          </div>
-          <div v-else class="cover-picker-grid">
-            <button
-              v-for="asset in coverPickerAssets"
-              :key="asset.id"
-              class="cover-picker-item"
-              :class="{ selected: asset.id === coverPickerFolder.cover_asset_id }"
-              @click="selectCover(asset.id)"
-            >
-              <img :src="thumbnailUrl(asset.id, 'small')" :alt="asset.filename" loading="lazy" />
-              <span v-if="asset.id === coverPickerFolder.cover_asset_id" class="current-cover-badge">
-                {{ t('album.currentCover') }}
-              </span>
-            </button>
+          <div ref="coverPickerBrowserRef" class="cover-picker-browser" @scroll="handleCoverPickerScroll">
+            <div v-if="coverPickerLoading" class="cover-picker-loading">
+              <LoaderCircle class="spin" :size="28" />
+              <span>{{ t('album.loadingPhotos') }}</span>
+            </div>
+            <div v-else-if="!coverPickerHasEntries" class="cover-picker-empty">
+              <ImageOff :size="32" />
+              <span>{{ t('album.noPhotosHere') }}</span>
+            </div>
+            <div v-else class="cover-picker-grid">
+              <button
+                v-for="folder in coverPickerChildFolders"
+                :key="`folder-${folder.id}`"
+                class="cover-picker-folder"
+                type="button"
+                @click="loadCoverPickerFolder(folder.id)"
+              >
+                <Folder :size="30" />
+                <span>{{ folder.name }}</span>
+                <small>{{ t('album.folderCardMeta', { media: formatCount(folder.photo_count, 'media'), folders: formatCount(folder.folder_count, 'folder') }) }}</small>
+              </button>
+              <button
+                v-for="asset in coverPickerAssets"
+                :key="`asset-${asset.id}`"
+                class="cover-picker-item"
+                :class="{ selected: asset.id === coverPickerFolder.cover_asset_id }"
+                type="button"
+                @click="selectCover(asset.id)"
+              >
+                <img :src="thumbnailUrl(asset.id, 'small')" :alt="asset.filename" loading="lazy" decoding="async" />
+                <span class="cover-picker-item-name">{{ asset.filename }}</span>
+                <span v-if="asset.id === coverPickerFolder.cover_asset_id" class="current-cover-badge">
+                  {{ t('album.currentCover') }}
+                </span>
+              </button>
+              <button
+                v-if="coverPickerCanLoadMore"
+                class="cover-picker-load-more"
+                type="button"
+                :disabled="coverPickerLoadingMore"
+                @click="loadMoreCoverPickerAssets"
+              >
+                <LoaderCircle v-if="coverPickerLoadingMore" class="spin" :size="17" />
+                {{ t('album.loadMore') }}
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -1929,8 +1967,16 @@ let albumAssetPickerRequestId = 0;
 const contextMenuFolder = ref<FolderType | null>(null);
 const contextMenuPos = ref({ x: 0, y: 0 });
 const coverPickerFolder = ref<FolderType | null>(null);
+const coverPickerCurrentFolder = ref<FolderType | null>(null);
+const coverPickerChildFolders = ref<FolderType[]>([]);
 const coverPickerAssets = ref<Asset[]>([]);
 const coverPickerLoading = ref(false);
+const coverPickerLoadingMore = ref(false);
+const coverPickerAssetsOffset = ref(0);
+const coverPickerCanLoadMore = ref(false);
+const coverPickerBrowserRef = ref<HTMLElement | null>(null);
+let coverPickerRequestId = 0;
+const coverPickerPageSize = 80;
 const renameFolder = ref<FolderType | null>(null);
 const renameName = ref('');
 const renameInputRef = ref<HTMLInputElement | null>(null);
@@ -2031,6 +2077,16 @@ const displayAssets = computed(() => {
     return compareByDirection(left - right);
   });
 });
+const coverPickerTrail = computed(() => {
+  const target = coverPickerFolder.value;
+  const current = coverPickerCurrentFolder.value;
+  if (!target || !current) return [];
+  const fullTrail = [...(current.ancestors || []), current];
+  const targetIndex = fullTrail.findIndex((folder) => folder.id === target.id);
+  if (targetIndex >= 0) return fullTrail.slice(targetIndex);
+  return current.id === target.id ? [current] : [target, current];
+});
+const coverPickerHasEntries = computed(() => coverPickerChildFolders.value.length > 0 || coverPickerAssets.value.length > 0);
 const searchQuery = computed(() => search.value.trim());
 const hasSearch = computed(() => searchQuery.value.length > 0);
 const globalSearchActive = computed(
@@ -3146,15 +3202,79 @@ function closeContextMenu() {
 async function openCoverPicker(folder: FolderType) {
   closeContextMenu();
   coverPickerFolder.value = folder;
+  await loadCoverPickerFolder(folder.id);
+}
+
+async function loadCoverPickerFolder(folderId: number) {
+  const requestId = ++coverPickerRequestId;
   coverPickerLoading.value = true;
+  coverPickerLoadingMore.value = false;
+  coverPickerChildFolders.value = [];
   coverPickerAssets.value = [];
+  coverPickerAssetsOffset.value = 0;
+  coverPickerCanLoadMore.value = false;
   try {
-    coverPickerAssets.value = await api.assets(folder.id, '', true);
+    const [folder, childFolders, assetsPage] = await Promise.all([
+      api.folder(folderId),
+      api.folders(folderId),
+      api.assets(folderId, '', false, false, {
+        mediaType: 'image',
+        sort: 'name',
+        limit: coverPickerPageSize,
+      }),
+    ]);
+    if (requestId !== coverPickerRequestId) return;
+    coverPickerCurrentFolder.value = folder;
+    coverPickerChildFolders.value = childFolders;
+    coverPickerAssets.value = assetsPage;
+    coverPickerAssetsOffset.value = assetsPage.length;
+    coverPickerCanLoadMore.value = assetsPage.length === coverPickerPageSize;
   } catch (err) {
-    showToast(err instanceof Error ? err.message : t('album.unableLoadPhotos'));
-    coverPickerFolder.value = null;
+    if (requestId === coverPickerRequestId) {
+      showToast(err instanceof Error ? err.message : t('album.unableLoadPhotos'));
+      closeCoverPicker();
+    }
   } finally {
-    coverPickerLoading.value = false;
+    if (requestId === coverPickerRequestId) {
+      coverPickerLoading.value = false;
+    }
+  }
+}
+
+async function loadMoreCoverPickerAssets() {
+  const folder = coverPickerCurrentFolder.value;
+  if (!folder || coverPickerLoadingMore.value || !coverPickerCanLoadMore.value) return;
+  const requestId = coverPickerRequestId;
+  coverPickerLoadingMore.value = true;
+  try {
+    const assetsPage = await api.assets(folder.id, '', false, false, {
+      mediaType: 'image',
+      sort: 'name',
+      limit: coverPickerPageSize,
+      offset: coverPickerAssetsOffset.value,
+    });
+    if (requestId !== coverPickerRequestId) return;
+    coverPickerAssets.value = [...coverPickerAssets.value, ...assetsPage];
+    coverPickerAssetsOffset.value += assetsPage.length;
+    coverPickerCanLoadMore.value = assetsPage.length === coverPickerPageSize;
+  } catch (err) {
+    if (requestId === coverPickerRequestId) {
+      showToast(err instanceof Error ? err.message : t('album.unableLoadPhotos'));
+    }
+  } finally {
+    if (requestId === coverPickerRequestId) {
+      coverPickerLoadingMore.value = false;
+    }
+  }
+}
+
+function handleCoverPickerScroll(event: Event) {
+  const container = event.currentTarget as HTMLElement | null;
+  if (!container || coverPickerLoading.value || coverPickerLoadingMore.value || !coverPickerCanLoadMore.value) return;
+
+  const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+  if (distanceFromBottom <= 160) {
+    void loadMoreCoverPickerAssets();
   }
 }
 
@@ -3174,7 +3294,15 @@ async function selectCover(assetId: number) {
 }
 
 function closeCoverPicker() {
+  coverPickerRequestId += 1;
   coverPickerFolder.value = null;
+  coverPickerCurrentFolder.value = null;
+  coverPickerChildFolders.value = [];
+  coverPickerAssets.value = [];
+  coverPickerAssetsOffset.value = 0;
+  coverPickerCanLoadMore.value = false;
+  coverPickerLoading.value = false;
+  coverPickerLoadingMore.value = false;
 }
 
 async function toggleFavoriteFilter() {

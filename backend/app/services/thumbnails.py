@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import concurrent.futures
 import hashlib
+import threading
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageOps
@@ -153,11 +154,42 @@ def _generate_thumbnail_file(
         return None
 
 
+def _save_thumbnail_results(
+    session: Session,
+    results: list[tuple[Asset, Path, int, int]],
+    size: str,
+) -> int:
+    saved = 0
+    for asset, output_path, width, height in results:
+        existing = session.exec(
+            select(Thumbnail).where(Thumbnail.asset_id == asset.id, Thumbnail.size == size)
+        ).first()
+        if existing:
+            _delete_old_thumbnail(existing, output_path)
+            existing.path = str(output_path)
+            existing.width = width
+            existing.height = height
+        else:
+            session.add(
+                Thumbnail(
+                    asset_id=asset.id or 0,
+                    size=size,
+                    path=str(output_path),
+                    width=width,
+                    height=height,
+                )
+            )
+        saved += 1
+    session.commit()
+    return saved
+
+
 def bulk_generate_thumbnails(
     session: Session,
     asset_ids: list[int],
     size: str = "small",
     max_workers: int = DEFAULT_THUMB_WORKERS,
+    cancel_event: threading.Event | None = None,
 ) -> int:
     if size not in THUMBNAIL_SIZES:
         size = "small"
@@ -219,13 +251,22 @@ def bulk_generate_thumbnails(
         session.commit()
         return generated_count
 
+    from app.services.scanner import ScanCancelled
+
     results: list[tuple[Asset, Path, int, int]] = []
-    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=max_workers)
+    cancelled = False
+    try:
         future_to_item: dict[concurrent.futures.Future, tuple[Asset, Path, Path]] = {
             executor.submit(_generate_thumbnail_file, item[1], item[2], max_size): item
             for item in work_items
         }
         for future in concurrent.futures.as_completed(future_to_item):
+            if cancel_event and cancel_event.is_set():
+                cancelled = True
+                _save_thumbnail_results(session, results, size)
+                raise ScanCancelled
+
             asset_item = future_to_item[future]
             try:
                 dims = future.result()
@@ -234,25 +275,12 @@ def bulk_generate_thumbnails(
             except Exception:
                 pass
 
-    for asset, output_path, width, height in results:
-        existing = session.exec(
-            select(Thumbnail).where(Thumbnail.asset_id == asset.id, Thumbnail.size == size)
-        ).first()
-        if existing:
-            _delete_old_thumbnail(existing, output_path)
-            existing.path = str(output_path)
-            existing.width = width
-            existing.height = height
-        else:
-            session.add(
-                Thumbnail(
-                    asset_id=asset.id or 0,
-                    size=size,
-                    path=str(output_path),
-                    width=width,
-                    height=height,
-                )
-            )
+            if cancel_event and cancel_event.is_set():
+                cancelled = True
+                _save_thumbnail_results(session, results, size)
+                raise ScanCancelled
+    finally:
+        executor.shutdown(wait=not cancelled, cancel_futures=cancelled)
 
-    session.commit()
-    return generated_count + len(results)
+    saved = _save_thumbnail_results(session, results, size)
+    return generated_count + saved

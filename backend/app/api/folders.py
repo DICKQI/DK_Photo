@@ -58,13 +58,27 @@ def update_folder_cover(folder_id: int, payload: FolderCoverUpdate, session: Ses
     asset = session.get(Asset, payload.cover_asset_id)
     if not asset:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found")
-    if asset.folder_id != folder.id:
+    if not folder_contains_asset(session, folder, asset):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Asset does not belong to this folder")
     folder.cover_asset_id = asset.id
     session.add(folder)
     session.commit()
     session.refresh(folder)
     return folder
+
+
+def folder_contains_asset(session: SessionDep, folder: Folder, asset: Asset) -> bool:
+    if asset.library_id != folder.library_id:
+        return False
+    current_id: int | None = asset.folder_id
+    while current_id is not None:
+        if current_id == folder.id:
+            return True
+        current = session.get(Folder, current_id)
+        if not current or current.library_id != folder.library_id:
+            return False
+        current_id = current.parent_id
+    return False
 
 
 @router.patch("/{folder_id}/rename", response_model=FolderRead)

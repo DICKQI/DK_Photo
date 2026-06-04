@@ -398,6 +398,43 @@ def test_member_cannot_modify_folder_metadata(tmp_path: Path) -> None:
     app.dependency_overrides.clear()
 
 
+def test_admin_can_set_folder_cover_from_descendant_asset(tmp_path: Path) -> None:
+    client, test_engine = isolated_client(tmp_path)
+    photo_root = tmp_path / "folder-cover-descendant"
+    create_photo(photo_root / "Trips" / "Lake" / "cover.jpg")
+    create_photo(photo_root / "Family" / "other.jpg")
+
+    with client:
+        login(client, "admin@example.com", "change-me-now")
+        library = client.post(
+            "/api/admin/libraries",
+            json={"name": "Folder Cover Descendant", "path": str(photo_root)},
+        ).json()
+        with Session(test_engine) as session:
+            scan_library(session, library["id"])
+
+        root = next(folder for folder in client.get("/api/folders").json() if folder["library_id"] == library["id"])
+        children = client.get(f"/api/folders?parent_id={root['id']}").json()
+        trips = next(folder for folder in children if folder["name"] == "Trips")
+        family = next(folder for folder in children if folder["name"] == "Family")
+        lake = next(folder for folder in client.get(f"/api/folders?parent_id={trips['id']}").json() if folder["name"] == "Lake")
+        cover_asset_id = client.get(f"/api/assets?folder_id={lake['id']}").json()[0]["id"]
+        other_asset_id = client.get(f"/api/assets?folder_id={family['id']}").json()[0]["id"]
+
+        updated = client.patch(f"/api/folders/{trips['id']}/cover", json={"cover_asset_id": cover_asset_id})
+        assert updated.status_code == 200, updated.text
+        assert updated.json()["cover_asset_id"] == cover_asset_id
+        with Session(test_engine) as session:
+            scan_library(session, library["id"])
+        refreshed = client.get(f"/api/folders/{trips['id']}")
+        assert refreshed.status_code == 200, refreshed.text
+        assert refreshed.json()["cover_asset_id"] == cover_asset_id
+
+        rejected = client.patch(f"/api/folders/{trips['id']}/cover", json={"cover_asset_id": other_asset_id})
+        assert rejected.status_code == 400
+    app.dependency_overrides.clear()
+
+
 def test_delete_library_removes_index_and_keeps_original_files(tmp_path: Path) -> None:
     client, test_engine = isolated_client(tmp_path)
     photo_root = tmp_path / "delete-photos"
