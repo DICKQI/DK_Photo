@@ -35,7 +35,7 @@ bash deploy.sh
 4. 首次部署时初始化管理员显示名称、邮箱和密码。
 5. 自动生成 `DK_PHOTO_SECRET_KEY`。
 6. 创建数据目录和照片目录。
-7. 检查端口占用。
+7. 检查端口占用；如果默认端口被占用，提示输入新的宿主机端口并写回 `.env`。
 8. 构建并启动服务。
 
 > 自动安装 Docker 需要服务器能访问外网，并且当前用户具有 `sudo` 权限。非 Ubuntu/Debian 系统需要先手动安装 Docker 与 Compose 插件。
@@ -83,6 +83,8 @@ docker compose ps
 | `FRONTEND_PORT` | 否 | `8080` | 前端宿主机端口 |
 | `BACKEND_BIND` | 否 | `127.0.0.1` | 后端监听地址，默认仅本机 |
 | `BACKEND_PORT` | 否 | `8000` | 后端宿主机端口 |
+
+`BACKEND_PORT` 只影响宿主机直接访问后端的端口，例如 `http://localhost:8001/docs`。前端容器内的 `/api` 代理仍通过 Docker 网络访问 `backend:8000`，因此修改 `BACKEND_PORT` 不会破坏前端访问后端。
 
 ## 目录结构
 

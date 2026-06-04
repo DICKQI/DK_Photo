@@ -421,22 +421,89 @@ port_in_use() {
     return 1
 }
 
-check_port_available() {
-    local label="$1"
-    local bind="$2"
-    local port="$3"
+is_valid_port() {
+    local port="$1"
+
+    [[ "$port" =~ ^[0-9]+$ ]] && [ "$port" -ge 1 ] && [ "$port" -le 65535 ]
+}
+
+suggest_available_port() {
+    local port="$1"
+
+    if ! is_valid_port "$port"; then
+        port=1024
+    fi
+
+    while port_in_use "$port"; do
+        port=$((port + 1))
+        if [ "$port" -gt 65535 ]; then
+            log_error "No available port found."
+            exit 1
+        fi
+    done
+
+    printf '%s' "$port"
+}
+
+resolve_port() {
+    local __resultvar="$1"
+    local label="$2"
+    local bind="$3"
+    local env_key="$4"
+    local port="$5"
+    local reserved_port="${6:-}"
+    local reserved_label="${7:-another service}"
+    local input="" suggested
 
     if [ -z "$port" ]; then
-        return
+        port="$(suggest_available_port 1024)"
     fi
 
-    if port_in_use "$port"; then
-        log_error "$label port ${port} is already in use on the host."
-        log_error "Change ${label^^}_PORT in .env or stop the process using this port."
-        exit 1
-    fi
+    while true; do
+        if ! is_valid_port "$port"; then
+            log_warn "$env_key is not a valid port: $port"
+            port="$(suggest_available_port 1024)"
+        fi
 
-    log_info "$label port available: ${bind}:${port}"
+        if [ -n "$reserved_port" ] && [ "$port" = "$reserved_port" ]; then
+            log_warn "$label port ${port} is already reserved for ${reserved_label}."
+            suggested="$(suggest_available_port "$((port + 1))")"
+            if [ "$suggested" = "$reserved_port" ]; then
+                suggested="$(suggest_available_port "$((suggested + 1))")"
+            fi
+            read -r -p "Enter another host port for ${label} [${suggested}]: " input
+            input="${input:-$suggested}"
+            input="$(trim "$input")"
+
+            if ! is_valid_port "$input"; then
+                log_warn "Please enter a port between 1 and 65535."
+                continue
+            fi
+
+            port="$input"
+            continue
+        fi
+
+        if ! port_in_use "$port"; then
+            env_set "$env_key" "$port"
+            printf -v "$__resultvar" '%s' "$port"
+            log_info "$label port available: ${bind}:${port}"
+            return
+        fi
+
+        suggested="$(suggest_available_port "$((port + 1))")"
+        log_warn "$label port ${port} is already in use on the host."
+        read -r -p "Enter another host port for ${label} [${suggested}]: " input
+        input="${input:-$suggested}"
+        input="$(trim "$input")"
+
+        if ! is_valid_port "$input"; then
+            log_warn "Please enter a port between 1 and 65535."
+            continue
+        fi
+
+        port="$input"
+    done
 }
 
 # -----------------------------------------------------------
@@ -542,8 +609,9 @@ fi
 # -----------------------------------------------------------
 log_step "Checking host ports..."
 
-check_port_available frontend "$FRONTEND_BIND" "$FRONTEND_PORT"
-check_port_available backend "$BACKEND_BIND" "$BACKEND_PORT"
+resolve_port FRONTEND_PORT frontend "$FRONTEND_BIND" FRONTEND_PORT "$FRONTEND_PORT"
+resolve_port BACKEND_PORT backend "$BACKEND_BIND" BACKEND_PORT "$BACKEND_PORT" "$FRONTEND_PORT" frontend
+log_info "Frontend API requests use the Docker network proxy http://backend:8000, so changing BACKEND_PORT only affects direct host access."
 
 # -----------------------------------------------------------
 # 6. Build and start
