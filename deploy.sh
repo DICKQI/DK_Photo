@@ -146,6 +146,35 @@ random_hex() {
     dd if=/dev/urandom bs="$bytes" count=1 2>/dev/null | od -An -tx1 | tr -d ' \n'
 }
 
+# 获取服务器局域网 IP 和公网 IP
+get_local_ip() {
+    local ip=""
+    # 优先用 ip route 获取默认网卡 IP
+    if command -v ip >/dev/null 2>&1; then
+        ip="$(ip -4 route get 1 2>/dev/null | awk '{print $7; exit}' | head -n 1)" || true
+    fi
+    # 回退：hostname -I
+    if [ -z "$ip" ] && command -v hostname >/dev/null 2>&1; then
+        ip="$(hostname -I 2>/dev/null | awk '{print $1}')" || true
+    fi
+    printf '%s' "${ip:-<server-ip>}"
+}
+
+# 尝试获取公网 IP（通过外部服务查询）
+get_public_ip() {
+    local pub_ip=""
+    if command -v curl >/dev/null 2>&1; then
+        # 多个备用源
+        for src in "https://ifconfig.me" "https://api.ipify.org" "https://ipv4.icanhazip.com"; do
+            pub_ip="$(curl -s --connect-timeout 3 "$src" 2>/dev/null || true)"
+            if [ -n "$pub_ip" ]; then
+                break
+            fi
+        done
+    fi
+    printf '%s' "${pub_ip}"
+}
+
 setup_sudo() {
     if [ "$(id -u)" -eq 0 ]; then
         SUDO=()
@@ -338,26 +367,26 @@ prompt_password() {
     local password="" confirm=""
 
     while true; do
-        read -r -s -p "Admin password (at least 8 chars; leave blank to auto-generate): " password
+        read -r -s -p "管理员密码（至少8位，留空则自动生成强密码）: " password
         echo ""
 
         if [ -z "$password" ]; then
             password="$(random_hex 12)"
             GENERATED_ADMIN_PASSWORD="$password"
-            log_info "Generated a strong admin password and saved it to .env."
+            log_info "已生成强密码并保存到 .env 文件。"
             printf -v "$__resultvar" '%s' "$password"
             return
         fi
 
         if [ "${#password}" -lt 8 ]; then
-            log_warn "Password must be at least 8 characters."
+            log_warn "密码至少需要 8 位字符，请重新输入。"
             continue
         fi
 
-        read -r -s -p "Confirm admin password: " confirm
+        read -r -s -p "确认管理员密码: " confirm
         echo ""
         if [ "$password" != "$confirm" ]; then
-            log_warn "Passwords do not match."
+            log_warn "两次输入的密码不一致，请重新输入。"
             continue
         fi
 
@@ -370,11 +399,11 @@ run_initial_admin_wizard() {
     local admin_name admin_email admin_password
     local current_name current_email
 
-    log_step "Initial admin setup..."
+    log_step "初始化管理员账号..."
     current_name="$(env_get DK_PHOTO_ADMIN_NAME "Administrator")"
     current_email="$(env_get DK_PHOTO_ADMIN_EMAIL "admin@example.com")"
 
-    prompt_required_value admin_name "Admin display name" "$current_name"
+    prompt_required_value admin_name "管理员昵称" "$current_name"
     prompt_email admin_email "$current_email"
     prompt_password admin_password
 
@@ -383,7 +412,7 @@ run_initial_admin_wizard() {
     env_set DK_PHOTO_ADMIN_PASSWORD "$admin_password"
 
     if [ "$admin_email" = "admin@example.com" ]; then
-        log_warn "Admin email is still admin@example.com. This is acceptable for local testing, but not recommended for production."
+        log_warn "管理员邮箱仍为 admin@example.com，本地测试可以接受，但不建议用于生产环境。"
     fi
 }
 
@@ -507,9 +536,9 @@ resolve_port() {
 }
 
 # -----------------------------------------------------------
-# 1. Check prerequisites
+# 1. 检查前置依赖 (Check prerequisites)
 # -----------------------------------------------------------
-log_step "Checking prerequisites..."
+log_step "检查前置依赖..."
 cd "$SCRIPT_DIR"
 log_info "Project directory: $SCRIPT_DIR"
 
@@ -517,9 +546,9 @@ ensure_docker
 ensure_command curl curl
 
 # -----------------------------------------------------------
-# 2. Create .env if not exists
+# 2. 创建 .env 配置文件 (Create .env if not exists)
 # -----------------------------------------------------------
-log_step "Setting up environment configuration..."
+log_step "配置环境变量..."
 
 if [ ! -f ".env" ]; then
     if [ ! -f ".env.example" ]; then
@@ -529,9 +558,9 @@ if [ ! -f ".env" ]; then
 
     cp .env.example .env
     ENV_CREATED=1
-    log_info "Created .env from .env.example."
+    log_info "已从 .env.example 创建 .env 配置文件。"
 else
-    log_info ".env file already exists."
+    log_info ".env 文件已存在。"
 fi
 
 PHOTOS_PATH="$(env_get PHOTOS_PATH "./photos")"
@@ -554,82 +583,82 @@ if [ "$DB_EXISTS" -eq 0 ]; then
         run_initial_admin_wizard
     fi
 else
-    log_info "Existing database detected: ${APP_DATA_PATH}/dk_photo.sqlite3"
-    log_info "Initial admin settings in .env will not overwrite existing users."
+    log_info "检测到已有数据库: ${APP_DATA_PATH}/dk_photo.sqlite3"
+    log_info ".env 中的管理员配置不会覆盖已有账号。"
 
     if is_default_admin_password; then
-        log_warn "DK_PHOTO_ADMIN_PASSWORD is still the default value in .env."
+        log_warn ".env 中的 DK_PHOTO_ADMIN_PASSWORD 仍为默认值。"
         if ! prompt_yes_no "Confirm that the existing admin password has already been changed in the app and continue?" "n"; then
-            log_error "Aborted. Please change the admin password or reset the database before deploying."
+            log_error "已中止。请修改管理员密码或重置数据库后再部署。"
             exit 1
         fi
     fi
 fi
 
 if [ "$GENERATED_SECRET_KEY" -eq 1 ]; then
-    log_warn "Existing login sessions will be invalidated if this was an existing deployment."
+    log_warn "密钥已更新，已有登录会话将失效。"
 fi
 
 if [ "${PHOTOS_PATH:0:1}" != "/" ]; then
-    log_warn "PHOTOS_PATH is relative (${PHOTOS_PATH}). This is fine for quick testing; use an absolute path for production."
+    log_warn "PHOTOS_PATH 为相对路径 (${PHOTOS_PATH})，快速测试可以接受；生产环境建议使用绝对路径。"
 fi
 
 # -----------------------------------------------------------
-# 3. Create data directories
+# 3. 创建数据目录 (Create data directories)
 # -----------------------------------------------------------
-log_step "Creating data directories..."
+log_step "创建数据目录..."
 
 mkdir -p "$APP_DATA_PATH"
-log_info "Data directory ready: $APP_DATA_PATH"
+log_info "数据目录就绪: $APP_DATA_PATH"
 
 if [ ! -d "$PHOTOS_PATH" ]; then
     mkdir -p "$PHOTOS_PATH"
-    log_warn "Photos directory created: $PHOTOS_PATH"
-    log_warn "Place your media files here, or update PHOTOS_PATH in .env."
+    log_warn "照片目录不存在，已创建: $PHOTOS_PATH"
+    log_warn "请将照片/视频放入此目录，或修改 .env 中的 PHOTOS_PATH。"
 else
     photo_count="$(find "$PHOTOS_PATH" -type f \( -iname "*.jpg" -o -iname "*.jpeg" -o -iname "*.png" -o -iname "*.webp" -o -iname "*.gif" -o -iname "*.mp4" -o -iname "*.mov" -o -iname "*.webm" -o -iname "*.avi" -o -iname "*.mkv" \) 2>/dev/null | wc -l || true)"
     photo_count="$(trim "$photo_count")"
-    log_info "Photos directory ready: $PHOTOS_PATH (found $photo_count media files)"
+    log_info "照片目录就绪: $PHOTOS_PATH（发现 $photo_count 个媒体文件）"
 fi
 
 # -----------------------------------------------------------
-# 4. Stop existing containers
+# 4. 停止已有容器 (Stop existing containers)
 # -----------------------------------------------------------
-log_step "Stopping existing containers (if any)..."
+log_step "停止已有容器（如有）..."
 
 if compose_cmd ps --quiet 2>/dev/null | grep -q .; then
     compose_cmd down
-    log_info "Existing containers stopped."
+    log_info "已有容器已停止。"
 else
-    log_info "No running containers found."
+    log_info "没有运行中的容器。"
 fi
 
 # -----------------------------------------------------------
-# 5. Check host ports after stopping our own containers
+# 5. 检查宿主机端口占用 (Check host ports)
 # -----------------------------------------------------------
-log_step "Checking host ports..."
+log_step "检查端口占用..."
 
 resolve_port FRONTEND_PORT frontend "$FRONTEND_BIND" FRONTEND_PORT "$FRONTEND_PORT"
 resolve_port BACKEND_PORT backend "$BACKEND_BIND" BACKEND_PORT "$BACKEND_PORT" "$FRONTEND_PORT" frontend
-log_info "Frontend API requests use the Docker network proxy http://backend:8000, so changing BACKEND_PORT only affects direct host access."
+log_info "前端通过 Docker 内部网络代理到 backend:8000，修改 BACKEND_PORT 仅影响宿主机直接访问后端。"
 
 # -----------------------------------------------------------
-# 6. Build and start
+# 6. 构建并启动服务 (Build and start)
 # -----------------------------------------------------------
-log_step "Building and starting services..."
+log_step "构建并启动服务..."
 
 compose_cmd up -d --build
 
 # -----------------------------------------------------------
-# 7. Wait for services to be healthy
+# 7. 等待服务就绪 (Wait for services to be ready)
 # -----------------------------------------------------------
-log_step "Waiting for services to be ready..."
+log_step "等待服务就绪..."
 
 MAX_WAIT=60
 WAITED=0
 while [ "$WAITED" -lt "$MAX_WAIT" ]; do
     if curl -sf "http://localhost:${BACKEND_PORT}/api/health" >/dev/null 2>&1; then
-        log_info "Backend health check passed."
+        log_info "后端健康检查通过。"
         break
     fi
     sleep 2
@@ -637,13 +666,13 @@ while [ "$WAITED" -lt "$MAX_WAIT" ]; do
 done
 
 if [ "$WAITED" -ge "$MAX_WAIT" ]; then
-    log_warn "Backend did not become healthy within ${MAX_WAIT}s. Check logs: $(compose_display) logs backend"
+    log_warn "后端在 ${MAX_WAIT}s 内未就绪，请检查日志: $(compose_display) logs backend"
 fi
 
 # -----------------------------------------------------------
-# 8. Show status
+# 8. 展示部署结果 (Show status / 访问地址)
 # -----------------------------------------------------------
-log_step "Deployment complete!"
+log_step "部署完成！"
 
 echo ""
 compose_cmd ps
@@ -652,31 +681,53 @@ echo ""
 admin_name="$(env_get DK_PHOTO_ADMIN_NAME "Administrator")"
 admin_email="$(env_get DK_PHOTO_ADMIN_EMAIL "admin@example.com")"
 
-log_info "DK Photo is now running!"
+# 获取局域网和公网 IP
+LOCAL_IP="$(get_local_ip)"
+PUBLIC_IP="$(get_public_ip)"
+
+log_info "DK Photo 已成功启动！"
 echo ""
-echo "  Frontend (local):   http://localhost:${FRONTEND_PORT}"
-if [ "$FRONTEND_BIND" = "0.0.0.0" ]; then
-    echo "  Frontend (server):  http://<server-ip>:${FRONTEND_PORT}"
-fi
-echo "  Backend (local):    http://localhost:${BACKEND_PORT}"
-echo "  API Docs (local):   http://localhost:${BACKEND_PORT}/docs"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "  📸 访问相册页面"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
-echo "Admin account:"
-echo "  Name:   ${admin_name}"
-echo "  Email:  ${admin_email}"
-if [ -n "$GENERATED_ADMIN_PASSWORD" ]; then
-    echo "  Password: ${GENERATED_ADMIN_PASSWORD}"
-    echo "  The generated password is also stored in .env."
+echo "  本机访问:    http://localhost:${FRONTEND_PORT}"
+echo "  局域网访问:  http://${LOCAL_IP}:${FRONTEND_PORT}"
+if [ -n "$PUBLIC_IP" ]; then
+    echo "  公网访问:    http://${PUBLIC_IP}:${FRONTEND_PORT}"
 else
-    echo "  Password: the value you entered during setup, or the existing value in .env."
+    echo "  公网访问:    （未能获取公网 IP，请检查网络）"
 fi
 echo ""
-echo "Useful commands:"
-echo "  $(compose_display) ps              # View service status"
-echo "  $(compose_display) logs -f         # Follow all logs"
-echo "  $(compose_display) logs -f backend # Follow backend logs"
-echo "  $(compose_display) restart         # Restart services"
-echo "  $(compose_display) down            # Stop and remove containers"
-echo "  $(compose_display) up -d --build   # Rebuild and restart"
+echo "  后端 API:    http://localhost:${BACKEND_PORT}"
+echo "  API 文档:    http://localhost:${BACKEND_PORT}/docs"
 echo ""
-log_info "Log in with the admin account shown above."
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "  👤 管理员账号"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+echo "  昵称:  ${admin_name}"
+echo "  邮箱:  ${admin_email}"
+if [ -n "$GENERATED_ADMIN_PASSWORD" ]; then
+    echo "  密码:  ${GENERATED_ADMIN_PASSWORD}（已存入 .env）"
+else
+    echo "  密码:  部署时填写的密码（已存入 .env）"
+fi
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "  📋 常用命令"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+echo "  $(compose_display) ps              # 查看服务状态"
+echo "  $(compose_display) logs -f         # 查看全部日志"
+echo "  $(compose_display) logs -f backend # 查看后端日志"
+echo "  $(compose_display) restart         # 重启服务"
+echo "  $(compose_display) down            # 停止并删除容器"
+echo "  $(compose_display) up -d --build   # 重建并启动"
+echo ""
+log_info "使用上方显示的管理员账号登录相册。"
+
+# 公网访问提示
+if [ -n "$PUBLIC_IP" ]; then
+    log_warn "如果通过公网访问，请确保路由器已配置端口转发 ${FRONTEND_PORT}，且防火墙已放行。"
+fi
