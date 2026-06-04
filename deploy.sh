@@ -298,19 +298,19 @@ prompt_required_value() {
     local __resultvar="$1"
     local label="$2"
     local default="$3"
-    local value
+    local input_value=""
 
     while true; do
         if [ -n "$default" ]; then
-            read -r -p "$label [$default]: " value
-            value="${value:-$default}"
+            read -r -p "$label [$default]: " input_value
+            input_value="${input_value:-$default}"
         else
-            read -r -p "$label: " value
+            read -r -p "$label: " input_value
         fi
 
-        value="$(trim "$value")"
-        if [ -n "$value" ]; then
-            printf -v "$__resultvar" '%s' "$value"
+        input_value="$(trim "$input_value")"
+        if [ -n "$input_value" ]; then
+            printf -v "$__resultvar" '%s' "$input_value"
             return
         fi
 
@@ -321,7 +321,7 @@ prompt_required_value() {
 prompt_email() {
     local __resultvar="$1"
     local default="$2"
-    local value
+    local value=""
 
     while true; do
         prompt_required_value value "Admin email" "$default"
@@ -335,7 +335,7 @@ prompt_email() {
 
 prompt_password() {
     local __resultvar="$1"
-    local password confirm
+    local password="" confirm=""
 
     while true; do
         read -r -s -p "Admin password (at least 8 chars; leave blank to auto-generate): " password
