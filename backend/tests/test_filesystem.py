@@ -17,6 +17,7 @@ def test_list_roots_returns_platform_metadata() -> None:
 def test_list_children_returns_only_directories(tmp_path: Path) -> None:
     (tmp_path / "folder").mkdir()
     (tmp_path / "photo.jpg").write_bytes(b"ignored")
+    (tmp_path / "clip.mp4").write_bytes(b"ignored")
     (tmp_path / "skip.heic").write_bytes(b"ignored")
     (tmp_path / "notes.txt").write_text("ignored")
 
@@ -25,4 +26,5 @@ def test_list_children_returns_only_directories(tmp_path: Path) -> None:
     assert children.path == str(tmp_path.resolve())
     assert children.child_folder_count == 1
     assert children.image_count == 1
+    assert children.media_count == 2
     assert {entry.name for entry in children.entries} == {"folder"}

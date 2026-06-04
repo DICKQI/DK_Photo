@@ -78,8 +78,19 @@
           <strong>{{ t('admin.noLibrariesYet') }}</strong>
           <span>{{ t('admin.noLibrariesHint') }}</span>
         </div>
+        <div v-else class="toolbar-row">
+          <label class="search-input">
+            <Search :size="16" />
+            <input v-model="librarySearch" :placeholder="t('admin.searchLibraries')" />
+          </label>
+        </div>
+        <div v-if="libraries.length && !filteredLibraries.length" class="panel-empty">
+          <GalleryHorizontal :size="24" />
+          <strong>{{ t('admin.noMatchingLibraries') }}</strong>
+          <span>{{ t('admin.noMatchingLibrariesHint') }}</span>
+        </div>
         <div v-else class="table-list">
-          <div v-for="library in libraries" :key="library.id" class="table-row library-row">
+          <div v-for="library in filteredLibraries" :key="library.id" class="table-row library-row">
             <div class="row-title">
               <span class="row-icon">
                 <GalleryHorizontal :size="20" />
@@ -257,27 +268,47 @@
           <strong>{{ t('admin.noScanJobs') }}</strong>
           <span>{{ t('admin.noScanJobsHint') }}</span>
         </div>
-        <div v-else class="table-list scrollable">
-          <div v-for="job in jobs" :key="job.id" class="table-row">
-            <div class="row-title">
-              <span class="row-icon" :class="jobStatusClass(job.status)">
-                <LoaderCircle v-if="job.status === 'running' || job.status === 'queued'" class="spin" :size="20" />
-                <Radar v-else-if="job.status === 'finished'" :size="20" />
-                <CircleAlert v-else-if="job.status === 'failed'" :size="20" />
-                <Radar v-else :size="20" />
-              </span>
-              <div>
-                <strong>#{{ job.id }} - {{ job.library_id ? libraryNameById(job.library_id) : t('admin.summaryLibraries') }}</strong>
-                <span>{{ job.message || t('common.waiting') }}</span>
-              </div>
-            </div>
-            <div class="row-actions">
-              <small class="status-pill" :class="jobStatusClass(job.status)">{{ jobStatusLabel(job.status) }}</small>
-              <small>{{ formatCount(job.total_assets, 'photo') }}</small>
-              <small class="muted">{{ jobTimeLabel(job) }}</small>
+        <template v-else>
+          <div class="toolbar-row">
+            <label class="search-input">
+              <Search :size="16" />
+              <input v-model="jobSearch" :placeholder="t('admin.searchScanJobs')" />
+            </label>
+            <div class="segmented-control compact-filter" :aria-label="t('admin.filterJobStatus')">
+              <button :class="{ active: jobStatusFilter === 'all' }" @click="jobStatusFilter = 'all'">{{ t('admin.allStatuses') }}</button>
+              <button :class="{ active: jobStatusFilter === 'running' }" @click="jobStatusFilter = 'running'">{{ t('admin.statusRunning') }}</button>
+              <button :class="{ active: jobStatusFilter === 'queued' }" @click="jobStatusFilter = 'queued'">{{ t('admin.statusQueued') }}</button>
+              <button :class="{ active: jobStatusFilter === 'finished' }" @click="jobStatusFilter = 'finished'">{{ t('admin.statusFinished') }}</button>
+              <button :class="{ active: jobStatusFilter === 'failed' }" @click="jobStatusFilter = 'failed'">{{ t('admin.statusFailed') }}</button>
             </div>
           </div>
-        </div>
+          <div v-if="!filteredJobs.length" class="panel-empty">
+            <Search :size="24" />
+            <strong>{{ t('admin.noMatchingScanJobs') }}</strong>
+            <span>{{ t('admin.noMatchingScanJobsHint') }}</span>
+          </div>
+          <div v-else class="table-list scrollable">
+            <div v-for="job in filteredJobs" :key="job.id" class="table-row">
+              <div class="row-title">
+                <span class="row-icon" :class="jobStatusClass(job.status)">
+                  <LoaderCircle v-if="job.status === 'running' || job.status === 'queued'" class="spin" :size="20" />
+                  <Radar v-else-if="job.status === 'finished'" :size="20" />
+                  <CircleAlert v-else-if="job.status === 'failed'" :size="20" />
+                  <Radar v-else :size="20" />
+                </span>
+                <div>
+                  <strong>#{{ job.id }} - {{ job.library_id ? libraryNameById(job.library_id) : t('admin.summaryLibraries') }}</strong>
+                  <span>{{ job.message || t('common.waiting') }}</span>
+                </div>
+              </div>
+              <div class="row-actions">
+                <small class="status-pill" :class="jobStatusClass(job.status)">{{ jobStatusLabel(job.status) }}</small>
+                <small>{{ formatCount(job.total_assets, 'media') }}</small>
+                <small class="muted">{{ jobTimeLabel(job) }}</small>
+              </div>
+            </div>
+          </div>
+        </template>
       </article>
 
       <article class="admin-panel">
@@ -289,26 +320,48 @@
           <strong>{{ t('admin.noShares') }}</strong>
           <span>{{ t('admin.noSharesHint') }}</span>
         </div>
-        <div v-else class="table-list scrollable">
-          <div v-for="share in shares" :key="share.id" class="table-row compact">
-            <div class="row-title compact-title">
-              <span class="row-icon compact-icon">
-                <ShieldCheck :size="16" />
-              </span>
-              <div>
-                <strong>{{ share.title }}</strong>
-                <span>/share/{{ share.token }}</span>
-              </div>
-            </div>
-            <div class="row-actions">
-              <small class="status-pill neutral">{{ share.expires_at ? formatDate(share.expires_at) : t('common.never') }}</small>
-              <button class="secondary-button compact-btn" @click="copyShareLink(share)">
-                <Copy :size="14" />
-                {{ t('common.copy') }}
-              </button>
+        <template v-else>
+          <div class="toolbar-row">
+            <label class="search-input">
+              <Search :size="16" />
+              <input v-model="shareSearch" :placeholder="t('admin.searchShares')" />
+            </label>
+            <div class="segmented-control compact-filter" :aria-label="t('admin.filterShareStatus')">
+              <button :class="{ active: shareStatusFilter === 'all' }" @click="shareStatusFilter = 'all'">{{ t('admin.allShareStatuses') }}</button>
+              <button :class="{ active: shareStatusFilter === 'active' }" @click="shareStatusFilter = 'active'">{{ t('admin.shareStatusActive') }}</button>
+              <button :class="{ active: shareStatusFilter === 'expiring' }" @click="shareStatusFilter = 'expiring'">{{ t('album.shareStatusExpiring') }}</button>
+              <button :class="{ active: shareStatusFilter === 'expired' }" @click="shareStatusFilter = 'expired'">{{ t('admin.shareStatusExpired') }}</button>
+              <button :class="{ active: shareStatusFilter === 'never' }" @click="shareStatusFilter = 'never'">{{ t('album.shareStatusNever') }}</button>
+              <button :class="{ active: shareStatusFilter === 'revoked' }" @click="shareStatusFilter = 'revoked'">{{ t('album.shareRevoked') }}</button>
             </div>
           </div>
-        </div>
+          <div v-if="!filteredShares.length" class="panel-empty">
+            <Search :size="24" />
+            <strong>{{ t('admin.noMatchingShares') }}</strong>
+            <span>{{ t('admin.noMatchingSharesHint') }}</span>
+          </div>
+          <div v-else class="table-list scrollable">
+            <div v-for="share in filteredShares" :key="share.id" class="table-row compact">
+              <div class="row-title compact-title">
+                <span class="row-icon compact-icon">
+                  <ShieldCheck :size="16" />
+                </span>
+                <div>
+                  <strong>{{ share.title }}</strong>
+                  <span>/share/{{ share.token }}</span>
+                  <span>{{ shareScopeLabel(share) }}</span>
+                </div>
+              </div>
+              <div class="row-actions">
+                <small class="status-pill" :class="shareStatusClass(share)">{{ shareStatusLabel(share) }}</small>
+                <button class="secondary-button compact-btn" @click="copyShareLink(share)">
+                  <Copy :size="14" />
+                  {{ t('common.copy') }}
+                </button>
+              </div>
+            </div>
+          </div>
+        </template>
       </article>
       </div>
     </section>
@@ -463,9 +516,14 @@ const libraryName = ref('Family Photos');
 const libraryPath = ref('/photos');
 const message = ref('');
 const messageKind = ref<'success' | 'error'>('success');
+const librarySearch = ref('');
 const userSearch = ref('');
+const shareSearch = ref('');
+const jobSearch = ref('');
 const userStatusFilter = ref<'all' | 'active' | 'disabled'>('all');
 const userRoleFilter = ref<'all' | 'admin' | 'member'>('all');
+const jobStatusFilter = ref<'all' | 'running' | 'queued' | 'finished' | 'failed'>('all');
+const shareStatusFilter = ref<'all' | 'active' | 'expiring' | 'expired' | 'never' | 'revoked'>('all');
 const editingLibraryId = ref<number | null>(null);
 const refreshKey = 'refresh';
 const createLibraryKey = 'library:create';
@@ -484,9 +542,14 @@ let messageTimer: ReturnType<typeof setTimeout> | null = null;
 
 const activeUserCount = computed(() => users.value.filter((user) => user.is_active).length);
 const runningJobCount = computed(() => jobs.value.filter((job) => ['queued', 'running'].includes(job.status)).length);
-const activeShareCount = computed(() => shares.value.filter((share) => !share.revoked_at).length);
+const activeShareCount = computed(() => shares.value.filter((share) => !share.revoked_at && !isShareExpired(share)).length);
 const isWorking = computed(() => Object.keys(busyKeys).length > 0);
 const permissionLoading = computed(() => (permissionUser.value ? isBusy(permissionLoadKey(permissionUser.value.id)) : false));
+const filteredLibraries = computed(() => {
+  const query = librarySearch.value.trim().toLowerCase();
+  if (!query) return libraries.value;
+  return libraries.value.filter((library) => librarySearchText(library).includes(query));
+});
 const filteredUsers = computed(() => {
   const query = userSearch.value.trim().toLowerCase();
   return users.value.filter((user) => {
@@ -497,6 +560,22 @@ const filteredUsers = computed(() => {
       (userStatusFilter.value === 'disabled' && !user.is_active);
     const matchesRole = userRoleFilter.value === 'all' || user.role === userRoleFilter.value;
     return matchesQuery && matchesStatus && matchesRole;
+  });
+});
+const filteredShares = computed(() => {
+  const query = shareSearch.value.trim().toLowerCase();
+  return shares.value.filter((share) => {
+    const matchesQuery = !query || shareSearchText(share).includes(query);
+    const matchesStatus = shareMatchesStatus(share);
+    return matchesQuery && matchesStatus;
+  });
+});
+const filteredJobs = computed(() => {
+  const query = jobSearch.value.trim().toLowerCase();
+  return jobs.value.filter((job) => {
+    const matchesStatus = jobStatusFilter.value === 'all' || job.status === jobStatusFilter.value;
+    const matchesQuery = !query || jobSearchText(job).includes(query);
+    return matchesStatus && matchesQuery;
   });
 });
 const userResultSummary = computed(() => {
@@ -878,10 +957,77 @@ function libraryNameById(libraryId: number) {
   return libraries.value.find((library) => library.id === libraryId)?.name ?? t('admin.libraryFallback', { id: libraryId });
 }
 
+function librarySearchText(library: Library) {
+  return [library.name, library.path, library.last_scan_at ? formatDateTime(library.last_scan_at) : t('common.neverScanned')].join(' ').toLowerCase();
+}
+
 function jobTimeLabel(job: ScanJob) {
   if (job.finished_at) return t('admin.jobFinished', { time: formatDateTime(job.finished_at) });
   if (job.started_at) return t('admin.jobStarted', { time: formatDateTime(job.started_at) });
   return t('common.notStarted');
+}
+
+function jobSearchText(job: ScanJob) {
+  const libraryName = job.library_id ? libraryNameById(job.library_id) : t('admin.summaryLibraries');
+  return [
+    `#${job.id}`,
+    libraryName,
+    jobStatusLabel(job.status),
+    job.status,
+    job.message || t('common.waiting'),
+    formatCount(job.total_assets, 'media'),
+    jobTimeLabel(job),
+  ]
+    .join(' ')
+    .toLowerCase();
+}
+
+function shareScopeLabel(share: ShareLink) {
+  if (share.share_kind === 'asset') return t('album.shareSingleAsset');
+  if (share.share_kind === 'folder') return t('album.shareFolder');
+  return t('album.shareAssetCount', { count: formatCount(share.asset_count, 'media') });
+}
+
+function shareSearchText(share: ShareLink) {
+  const expiry = share.expires_at ? formatDate(share.expires_at) : t('common.never');
+  return `${share.title} ${share.token} ${shareScopeLabel(share)} ${shareStatusLabel(share)} ${expiry}`.toLowerCase();
+}
+
+function shareMatchesStatus(share: ShareLink) {
+  if (shareStatusFilter.value === 'all') return true;
+  if (shareStatusFilter.value === 'active') return !share.revoked_at && !isShareExpired(share);
+  if (shareStatusFilter.value === 'expired') return !share.revoked_at && isShareExpired(share);
+  if (shareStatusFilter.value === 'revoked') return Boolean(share.revoked_at);
+  if (shareStatusFilter.value === 'never') return !share.revoked_at && !share.expires_at;
+  return !share.revoked_at && isShareExpiringSoon(share);
+}
+
+function shareStatusLabel(share: ShareLink) {
+  if (share.revoked_at) return t('album.shareRevoked');
+  if (isShareExpired(share)) return t('admin.shareStatusExpired');
+  if (isShareExpiringSoon(share)) return t('album.shareStatusExpiring');
+  if (!share.expires_at) return t('album.shareStatusNever');
+  return t('admin.shareStatusActive');
+}
+
+function shareStatusClass(share: ShareLink) {
+  if (share.revoked_at || isShareExpired(share)) return 'off';
+  if (isShareExpiringSoon(share)) return 'active';
+  return 'neutral';
+}
+
+function isShareExpired(share: ShareLink) {
+  if (!share.expires_at) return false;
+  const expiresAt = new Date(share.expires_at).getTime();
+  return !Number.isNaN(expiresAt) && expiresAt < Date.now();
+}
+
+function isShareExpiringSoon(share: ShareLink) {
+  if (!share.expires_at) return false;
+  const expiresAt = new Date(share.expires_at).getTime();
+  if (Number.isNaN(expiresAt)) return false;
+  const daysRemaining = (expiresAt - Date.now()) / 86400000;
+  return daysRemaining >= 0 && daysRemaining <= 7;
 }
 
 async function copyShareLink(share: ShareLink) {

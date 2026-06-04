@@ -8,9 +8,13 @@
       </div>
       <div class="share-header-actions">
         <LanguageToggle />
+        <button class="secondary-button" @click="copyShareLink">
+          <Link2 :size="16" />
+          {{ t('album.shareCopyLink') }}
+        </button>
         <span class="share-expiry">
           <Images :size="16" />
-          {{ formatCount(assets.length, 'photo') }}
+          {{ formatCount(assets.length, 'media') }}
         </span>
         <span v-if="share?.expires_at" class="share-expiry">
           <Clock :size="16" />
@@ -40,6 +44,25 @@
           <span>{{ t('share.downloadableOriginals', { originals: formatCount(assets.length, 'original') }) }}</span>
         </div>
         <div class="share-toolbar-actions">
+          <button class="secondary-button" :disabled="downloadingAll" @click="downloadAllOriginals">
+            <LoaderCircle v-if="downloadingAll" class="spin" :size="16" />
+            <Download v-else :size="16" />
+            {{ downloadingAll ? t('share.downloadingAll') : t('share.downloadAll') }}
+          </button>
+          <div class="segmented-control" :aria-label="t('album.mediaFilter')">
+            <button :class="{ active: mediaFilter === 'all' }" :title="t('album.showAllMedia')" @click="mediaFilter = 'all'">
+              <Images :size="16" />
+              {{ t('common.all') }}
+            </button>
+            <button :class="{ active: mediaFilter === 'image' }" :title="t('album.showImagesOnly')" @click="mediaFilter = 'image'">
+              <Images :size="16" />
+              {{ t('common.photos') }}
+            </button>
+            <button :class="{ active: mediaFilter === 'video' }" :title="t('album.showVideosOnly')" @click="mediaFilter = 'video'">
+              <Play :size="16" />
+              {{ t('common.videos') }}
+            </button>
+          </div>
           <div class="segmented-control sort-control" :aria-label="t('share.sortSharedPhotos')">
             <button :class="{ active: sortMode === 'date' }" :title="t('album.sortByDate')" @click="sortMode = 'date'">
               <Clock :size="16" />
@@ -68,9 +91,18 @@
         </div>
       </section>
 
-      <section class="public-grid" :style="{ '--tile-size': tileSize }">
+      <section v-if="!displayAssets.length" class="empty-state share-filter-empty">
+        <ImageOff :size="34" />
+        <strong>{{ t('share.noFilteredMedia') }}</strong>
+        <span>{{ t('share.noFilteredMediaHint') }}</span>
+        <button class="secondary-button" @click="mediaFilter = 'all'">
+          {{ t('common.clearFilter') }}
+        </button>
+      </section>
+
+      <section v-else class="public-grid" :style="{ '--tile-size': tileSize }">
         <article
-          v-for="(asset, index) in sortedAssets"
+          v-for="(asset, index) in displayAssets"
           :key="asset.id"
           class="photo-tile"
           :style="{ '--tile-index': index }"
@@ -78,6 +110,9 @@
           <button class="photo-open" @click="openViewer(index)">
             <span class="photo-thumb">
               <img :src="publicThumbnailUrl(token, asset.id, shareThumbnailSize)" :alt="asset.filename" loading="lazy" />
+              <span v-if="isVideoAsset(asset)" class="photo-media-badge" :title="t('album.videoAsset')">
+                <Play :size="14" fill="currentColor" />
+              </span>
               <span class="photo-hover">
                 <Maximize2 :size="17" />
                 {{ t('common.open') }}
@@ -89,39 +124,46 @@
               <span>{{ formatBytes(asset.size) }}</span>
             </span>
           </button>
-          <a class="photo-quick-action" :href="publicOriginalUrl(token, asset.id)" target="_blank" rel="noreferrer" :title="t('common.downloadOriginal')">
-            <Download :size="17" />
-          </a>
+          <button class="photo-quick-action" :disabled="downloadingAssetId === asset.id" :title="t('common.downloadOriginal')" @click="downloadSingleOriginal(asset)">
+            <LoaderCircle v-if="downloadingAssetId === asset.id" class="spin" :size="17" />
+            <Download v-else :size="17" />
+          </button>
         </article>
       </section>
     </template>
 
     <PhotoViewer
       v-if="viewerIndex !== null"
-      :assets="sortedAssets"
+      :assets="displayAssets"
       :index="viewerIndex"
       :can-share="false"
+      :can-favorite="false"
+      :can-locate="false"
       :original-url-for="publicOriginalFor"
       :thumbnail-url-for="publicThumbnailFor"
       @close="viewerIndex = null"
       @update:index="viewerIndex = $event"
+      @downloaded="showToast(t('viewer.downloadStarted'))"
+      @download-error="showToast($event)"
     />
+    <p v-if="toastMessage" class="toast">{{ toastMessage }}</p>
   </main>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
-import { ArrowDownAZ, ArrowUpAZ, Clock, Download, ImageOff, Images, LayoutGrid, Maximize2 } from 'lucide-vue-next';
+import { ArrowDownAZ, ArrowUpAZ, Clock, Download, ImageOff, Images, LayoutGrid, Link2, LoaderCircle, Maximize2, Play } from 'lucide-vue-next';
 import LanguageToggle from '../components/LanguageToggle.vue';
 import PhotoViewer from '../components/PhotoViewer.vue';
 import { useLocale } from '../composables/useLocale';
-import { api, publicOriginalUrl, publicThumbnailUrl } from '../services/api';
+import { api, downloadUrl, publicOriginalUrl, publicThumbnailUrl } from '../services/api';
 import type { Asset, PublicShare } from '../types';
 
 type ShareSortMode = 'date' | 'name';
 type ShareSortDirection = 'asc' | 'desc';
 type ShareTileMode = 'comfortable' | 'large';
+type ShareMediaFilter = 'all' | 'image' | 'video';
 
 const route = useRoute();
 const token = route.params.token as string;
@@ -133,12 +175,17 @@ const error = ref('');
 const sortMode = ref<ShareSortMode>(storedShareSortMode());
 const sortDirection = ref<ShareSortDirection>(storedShareSortDirection());
 const tileMode = ref<ShareTileMode>(storedShareTileMode());
+const mediaFilter = ref<ShareMediaFilter>(storedShareMediaFilter());
 const viewerIndex = ref<number | null>(null);
+const downloadingAll = ref(false);
+const downloadingAssetId = ref<number | null>(null);
+const toastMessage = ref('');
+let toastTimer: ReturnType<typeof window.setTimeout> | null = null;
 
 const shareSubtitle = computed(() => {
   if (loading.value) return t('share.preparing');
   if (error.value) return t('share.unopenable');
-  return t('share.available', { photos: formatCount(assets.value.length, 'photo') });
+  return t('share.available', { media: formatCount(assets.value.length, 'media') });
 });
 
 const sortedAssets = computed(() => {
@@ -150,6 +197,11 @@ const sortedAssets = computed(() => {
     return compareByDirection(left - right);
   });
 });
+const displayAssets = computed(() => {
+  if (mediaFilter.value === 'image') return sortedAssets.value.filter((asset) => asset.mime_type.startsWith('image/'));
+  if (mediaFilter.value === 'video') return sortedAssets.value.filter((asset) => asset.mime_type.startsWith('video/'));
+  return sortedAssets.value;
+});
 
 const tileSize = computed(() => (tileMode.value === 'large' ? '260px' : '190px'));
 const shareThumbnailSize = computed(() => (tileMode.value === 'large' ? 'large' : 'medium'));
@@ -158,6 +210,10 @@ const sortDirectionTitle = computed(() => (sortDirection.value === 'asc' ? t('co
 watch(sortMode, (value) => localStorage.setItem('dk-photo-share-sort-mode', value));
 watch(sortDirection, (value) => localStorage.setItem('dk-photo-share-sort-direction', value));
 watch(tileMode, (value) => localStorage.setItem('dk-photo-share-tile-mode', value));
+watch(mediaFilter, (value) => {
+  localStorage.setItem('dk-photo-share-media-filter', value);
+  viewerIndex.value = null;
+});
 
 onMounted(async () => {
   try {
@@ -170,8 +226,21 @@ onMounted(async () => {
   }
 });
 
+onBeforeUnmount(() => {
+  if (toastTimer) window.clearTimeout(toastTimer);
+});
+
 function openViewer(index: number) {
   viewerIndex.value = index;
+}
+
+async function copyShareLink() {
+  try {
+    await navigator.clipboard?.writeText(window.location.href);
+    showToast(t('admin.shareCopied'));
+  } catch {
+    showToast(t('admin.unableCopyShare'));
+  }
 }
 
 function toggleSortDirection() {
@@ -187,6 +256,57 @@ function publicThumbnailFor(asset: Asset, size: string) {
   return publicThumbnailUrl(token, asset.id, size);
 }
 
+function isVideoAsset(asset: Asset) {
+  return asset.mime_type.startsWith('video/');
+}
+
+async function downloadAllOriginals() {
+  if (downloadingAll.value) return;
+  downloadingAll.value = true;
+  try {
+    const archive = await api.downloadPublicShare(token);
+    triggerBrowserDownload(archive, 'dk-photo-share-originals.zip');
+    showToast(t('viewer.downloadStarted'));
+  } catch (err) {
+    showToast(err instanceof Error ? err.message : t('share.unableDownloadAll'));
+  } finally {
+    downloadingAll.value = false;
+  }
+}
+
+async function downloadSingleOriginal(asset: Asset) {
+  if (downloadingAssetId.value !== null) return;
+  downloadingAssetId.value = asset.id;
+  try {
+    const original = await downloadUrl(publicOriginalUrl(token, asset.id));
+    triggerBrowserDownload(original, asset.filename);
+    showToast(t('viewer.downloadStarted'));
+  } catch (err) {
+    showToast(err instanceof Error ? err.message : t('viewer.unableDownloadOriginal'));
+  } finally {
+    downloadingAssetId.value = null;
+  }
+}
+
+function triggerBrowserDownload(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.append(anchor);
+  anchor.click();
+  anchor.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function showToast(message: string) {
+  toastMessage.value = message;
+  if (toastTimer) window.clearTimeout(toastTimer);
+  toastTimer = window.setTimeout(() => {
+    toastMessage.value = '';
+  }, 3200);
+}
+
 function storedShareSortMode(): ShareSortMode {
   const value = localStorage.getItem('dk-photo-share-sort-mode');
   return value === 'date' || value === 'name' ? value : 'date';
@@ -200,6 +320,11 @@ function storedShareSortDirection(): ShareSortDirection {
 function storedShareTileMode(): ShareTileMode {
   const value = localStorage.getItem('dk-photo-share-tile-mode');
   return value === 'comfortable' || value === 'large' ? value : 'comfortable';
+}
+
+function storedShareMediaFilter(): ShareMediaFilter {
+  const value = localStorage.getItem('dk-photo-share-media-filter');
+  return value === 'image' || value === 'video' ? value : 'all';
 }
 
 function compareByDirection(value: number) {

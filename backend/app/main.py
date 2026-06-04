@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import admin, assets, auth, folders, shares
+from app.api import admin, albums, assets, auth, folders, shares
 from app.config import settings
 from app.db import create_db_and_tables
 from app.services.watcher import LibraryWatcher
@@ -37,6 +37,7 @@ app.add_middleware(
 app.include_router(auth.router)
 app.include_router(folders.router)
 app.include_router(assets.router)
+app.include_router(albums.router)
 app.include_router(admin.router)
 app.include_router(shares.router)
 

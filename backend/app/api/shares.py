@@ -5,9 +5,11 @@ from secrets import token_urlsafe
 
 from fastapi import APIRouter, HTTPException, Query, status
 from fastapi.responses import FileResponse
+from sqlalchemy import func
 from sqlmodel import select
 
 from app.deps import CurrentUser, SessionDep
+from app.api.assets import stream_asset_archive
 from app.models import Asset, Folder, LibraryRoot, ShareAsset, ShareLink
 from app.schemas import AssetRead, PublicShareRead, ShareCreate, ShareRead, ShareUpdate
 from app.services.paths import safe_asset_path
@@ -19,7 +21,7 @@ router = APIRouter(tags=["shares"])
 
 
 @router.post("/api/shares", response_model=ShareRead)
-def create_share(payload: ShareCreate, session: SessionDep, current_user: CurrentUser) -> ShareLink:
+def create_share(payload: ShareCreate, session: SessionDep, current_user: CurrentUser) -> ShareRead:
     modes = sum(1 for v in [payload.asset_id, payload.folder_id, payload.asset_ids] if v)
     if modes != 1:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Share exactly one of: asset, folder, or list of assets")
@@ -65,21 +67,22 @@ def create_share(payload: ShareCreate, session: SessionDep, current_user: Curren
         for aid in shared_asset_ids:
             session.add(ShareAsset(share_id=share.id, asset_id=aid))
         session.commit()
-    return share
+        session.refresh(share)
+    return share_read(session, share)
 
 
 @router.get("/api/shares", response_model=list[ShareRead])
-def list_my_shares(session: SessionDep, current_user: CurrentUser) -> list[ShareLink]:
+def list_my_shares(session: SessionDep, current_user: CurrentUser) -> list[ShareRead]:
     shares = session.exec(
         select(ShareLink)
         .where(ShareLink.creator_id == current_user.id, ShareLink.revoked_at == None)
         .order_by(ShareLink.created_at.desc())
     ).all()
-    return shares
+    return [share_read(session, share) for share in shares]
 
 
 @router.patch("/api/shares/{share_id}", response_model=ShareRead)
-def update_share(share_id: int, payload: ShareUpdate, session: SessionDep, current_user: CurrentUser) -> ShareLink:
+def update_share(share_id: int, payload: ShareUpdate, session: SessionDep, current_user: CurrentUser) -> ShareRead:
     share = session.get(ShareLink, share_id)
     if not share:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Share not found")
@@ -97,7 +100,7 @@ def update_share(share_id: int, payload: ShareUpdate, session: SessionDep, curre
     session.add(share)
     session.commit()
     session.refresh(share)
-    return share
+    return share_read(session, share)
 
 
 @router.delete("/api/shares/{share_id}")
@@ -144,6 +147,19 @@ def get_public_share(token: str, session: SessionDep) -> PublicShareRead:
 @router.get("/api/public/shares/{token}/assets", response_model=list[AssetRead])
 def get_public_share_assets(token: str, session: SessionDep) -> list[Asset]:
     share = get_active_share(session, token)
+    return public_share_assets(session, share)
+
+
+@router.get("/api/public/shares/{token}/download")
+def download_public_share(token: str, session: SessionDep):
+    share = get_active_share(session, token)
+    assets = public_share_assets(session, share)
+    if not assets:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No assets in share")
+    return stream_asset_archive(session, assets, "dk-photo-share-originals.zip")
+
+
+def public_share_assets(session: SessionDep, share: ShareLink) -> list[Asset]:
     if share.asset_id:
         asset = session.get(Asset, share.asset_id)
         return [asset] if asset else []
@@ -193,3 +209,43 @@ def _share_contains_asset(session: SessionDep, share: ShareLink, asset: Asset) -
     return session.exec(
         select(ShareAsset).where(ShareAsset.share_id == share.id, ShareAsset.asset_id == asset.id)
     ).first() is not None
+
+
+def share_read(session: SessionDep, share: ShareLink) -> ShareRead:
+    asset_ids = share_asset_ids(session, share)
+    return ShareRead(
+        id=share.id or 0,
+        token=share.token,
+        title=share.title,
+        asset_id=share.asset_id,
+        folder_id=share.folder_id,
+        asset_ids=asset_ids,
+        asset_count=share_asset_count(session, share),
+        share_kind=share_kind(share),
+        expires_at=share.expires_at,
+        revoked_at=share.revoked_at,
+        created_at=share.created_at,
+    )
+
+
+def share_kind(share: ShareLink) -> str:
+    if share.asset_id:
+        return "asset"
+    if share.folder_id:
+        return "folder"
+    return "assets"
+
+
+def share_asset_ids(session: SessionDep, share: ShareLink) -> list[int] | None:
+    if share.asset_id or share.folder_id:
+        return None
+    rows = session.exec(select(ShareAsset.asset_id).where(ShareAsset.share_id == share.id)).all()
+    return list(rows)
+
+
+def share_asset_count(session: SessionDep, share: ShareLink) -> int:
+    if share.asset_id:
+        return 1
+    if share.folder_id:
+        return session.exec(select(func.count(Asset.id)).where(Asset.folder_id == share.folder_id)).one()
+    return session.exec(select(func.count(ShareAsset.id)).where(ShareAsset.share_id == share.id)).one()

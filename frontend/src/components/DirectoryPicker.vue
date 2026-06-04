@@ -220,7 +220,7 @@ const error = ref('');
 const platform = ref('');
 const showAdvanced = ref(false);
 const currentFolderCount = ref(0);
-const currentImageCount = ref(0);
+const currentMediaCount = ref(0);
 const { t, formatCount } = useLocale();
 let previousBodyOverflow = '';
 let isBodyScrollLocked = false;
@@ -248,15 +248,15 @@ const directoryHint = computed(() => {
   if (filterText.value) return t('directory.hintFiltering');
   return t('directory.hintFoldersOnly');
 });
-const currentSummary = computed(() => formatCounts(currentFolderCount.value, currentImageCount.value));
+const currentSummary = computed(() => formatCounts(currentFolderCount.value, currentMediaCount.value));
 const currentFolderLabel = computed(() => {
   if (!currentPath.value) return t('directory.currentFolder');
   const segments = buildPathSegments(currentPath.value);
   return segments[segments.length - 1]?.label ?? currentPath.value;
 });
 const currentEmptyText = computed(() => {
-  if (currentImageCount.value > 0) return t('directory.emptyWithPhotos', { photos: formatCount(currentImageCount.value, 'photo') });
-  return t('directory.emptyWithoutPhotos');
+  if (currentMediaCount.value > 0) return t('directory.emptyWithMedia', { media: formatCount(currentMediaCount.value, 'media') });
+  return t('directory.emptyWithoutMedia');
 });
 const pathSegments = computed(() => buildPathSegments(currentPath.value));
 
@@ -294,12 +294,12 @@ async function openPath(path: string) {
     currentPath.value = result.path;
     manualPath.value = result.path;
     currentFolderCount.value = result.child_folder_count;
-    currentImageCount.value = result.image_count;
+    currentMediaCount.value = mediaCount(result);
   } catch (err) {
     error.value = err instanceof Error ? err.message : t('directory.unableLoadFolder');
     entries.value = [];
     currentFolderCount.value = 0;
-    currentImageCount.value = 0;
+    currentMediaCount.value = 0;
   } finally {
     loading.value = false;
   }
@@ -320,17 +320,21 @@ function rootIcon(root: FilesystemEntry) {
 }
 
 function rootSummary(root: FilesystemEntry) {
-  const counts = formatCounts(root.child_folder_count, root.image_count);
+  const counts = formatCounts(root.child_folder_count, mediaCount(root));
   return `${groupLabel(root.group)} - ${counts}`;
 }
 
 function entrySummary(entry: FilesystemEntry) {
   if (!entry.is_accessible) return entry.error || t('directory.notAccessible');
-  return formatCounts(entry.child_folder_count, entry.image_count);
+  return formatCounts(entry.child_folder_count, mediaCount(entry));
 }
 
-function formatCounts(folderCount: number, imageCount: number) {
-  return `${formatCount(folderCount, 'folder')} / ${formatCount(imageCount, 'photo')}`;
+function formatCounts(folderCount: number, mediaCountValue: number) {
+  return `${formatCount(folderCount, 'folder')} / ${formatCount(mediaCountValue, 'media')}`;
+}
+
+function mediaCount(entry: { media_count?: number; image_count: number }) {
+  return entry.media_count ?? entry.image_count;
 }
 
 function groupLabel(group: string | null) {

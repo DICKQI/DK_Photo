@@ -6,7 +6,7 @@ from pathlib import Path
 
 from app.config import settings
 from app.schemas import FilesystemChildren, FilesystemEntry, FilesystemRoots
-from app.services.scanner import is_supported_image
+from app.services.scanner import is_supported_image, is_supported_media
 
 
 def current_platform() -> str:
@@ -27,7 +27,7 @@ def _entry(
         return None
     if not resolved.exists() or not resolved.is_dir():
         return None
-    child_folder_count, image_count = _directory_counts(resolved)
+    child_folder_count, image_count, media_count = _directory_counts(resolved)
     return FilesystemEntry(
         name=name or resolved.name or str(resolved),
         path=str(resolved),
@@ -36,6 +36,7 @@ def _entry(
         group=group,
         child_folder_count=child_folder_count,
         image_count=image_count,
+        media_count=media_count,
     )
 
 
@@ -54,25 +55,28 @@ def _add_unique(entries: list[FilesystemEntry], entry: FilesystemEntry | None) -
         entries.append(entry)
 
 
-def _directory_counts(path: Path) -> tuple[int, int]:
+def _directory_counts(path: Path) -> tuple[int, int, int]:
     child_folder_count = 0
     image_count = 0
+    media_count = 0
     try:
         for child in path.iterdir():
             try:
                 if child.is_dir():
                     child_folder_count += 1
-                elif child.is_file() and is_supported_image(child):
-                    image_count += 1
+                elif child.is_file() and is_supported_media(child):
+                    media_count += 1
+                    if is_supported_image(child):
+                        image_count += 1
             except OSError:
                 continue
     except OSError:
-        return 0, 0
-    return child_folder_count, image_count
+        return 0, 0, 0
+    return child_folder_count, image_count, media_count
 
 
 def _entry_with_counts(path: Path, *, name: str | None = None, is_accessible: bool = True, error: str | None = None) -> FilesystemEntry:
-    child_folder_count, image_count = (0, 0) if not is_accessible else _directory_counts(path)
+    child_folder_count, image_count, media_count = (0, 0, 0) if not is_accessible else _directory_counts(path)
     return FilesystemEntry(
         name=name or path.name or str(path),
         path=_display_path(path),
@@ -80,6 +84,7 @@ def _entry_with_counts(path: Path, *, name: str | None = None, is_accessible: bo
         error=error,
         child_folder_count=child_folder_count,
         image_count=image_count,
+        media_count=media_count,
     )
 
 
@@ -145,6 +150,7 @@ def list_children(path: str) -> FilesystemChildren:
     entries: list[FilesystemEntry] = []
     current_child_folder_count = 0
     current_image_count = 0
+    current_media_count = 0
     try:
         children = sorted(current.iterdir(), key=lambda item: item.name.lower())
     except OSError as exc:
@@ -172,8 +178,10 @@ def list_children(path: str) -> FilesystemChildren:
             continue
         if is_dir:
             current_child_folder_count += 1
-        elif is_supported_image(child):
-            current_image_count += 1
+        elif is_supported_media(child):
+            current_media_count += 1
+            if is_supported_image(child):
+                current_image_count += 1
             continue
         else:
             continue
@@ -191,4 +199,5 @@ def list_children(path: str) -> FilesystemChildren:
         entries=entries,
         child_folder_count=current_child_folder_count,
         image_count=current_image_count,
+        media_count=current_media_count,
     )

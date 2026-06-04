@@ -64,8 +64,66 @@ class Asset(SQLModel, table=True):
     size: int = 0
     mtime: float = Field(index=True)
     captured_at: Optional[datetime] = None
+    camera_make: Optional[str] = None
+    camera_model: Optional[str] = None
+    lens_model: Optional[str] = None
+    iso: Optional[int] = None
+    aperture: Optional[str] = None
+    exposure_time: Optional[str] = None
+    focal_length: Optional[str] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
+
+
+class AssetFavorite(SQLModel, table=True):
+    __table_args__ = (UniqueConstraint("user_id", "asset_id"),)
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="user.id", index=True)
+    asset_id: int = Field(foreign_key="asset.id", index=True)
+    created_at: datetime = Field(default_factory=utc_now)
+
+
+class AssetTag(SQLModel, table=True):
+    __table_args__ = (UniqueConstraint("user_id", "asset_id", "name"),)
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="user.id", index=True)
+    asset_id: int = Field(foreign_key="asset.id", index=True)
+    name: str = Field(index=True)
+    created_at: datetime = Field(default_factory=utc_now)
+
+
+class AssetMetadata(SQLModel, table=True):
+    __table_args__ = (UniqueConstraint("user_id", "asset_id"),)
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="user.id", index=True)
+    asset_id: int = Field(foreign_key="asset.id", index=True)
+    description: str = ""
+    rating: int = Field(default=0, index=True)
+    updated_at: datetime = Field(default_factory=utc_now)
+
+
+class PhotoAlbum(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    owner_id: int = Field(foreign_key="user.id", index=True)
+    name: str
+    description: str = ""
+    cover_asset_id: Optional[int] = Field(default=None, foreign_key="asset.id")
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
+
+
+class PhotoAlbumAsset(SQLModel, table=True):
+    __table_args__ = (UniqueConstraint("album_id", "asset_id"),)
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    album_id: int = Field(foreign_key="photoalbum.id", index=True)
+    asset_id: int = Field(foreign_key="asset.id", index=True)
+    added_at: datetime = Field(default_factory=utc_now)
 
 
 class Thumbnail(SQLModel, table=True):

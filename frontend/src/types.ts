@@ -38,12 +38,70 @@ export interface Asset {
   folder_id: number;
   filename: string;
   path: string;
+  library_name: string | null;
+  folder_name: string | null;
+  folder_path: string | null;
   mime_type: string;
   width: number | null;
   height: number | null;
   size: number;
   mtime: number;
   captured_at: string | null;
+  camera_make: string | null;
+  camera_model: string | null;
+  lens_model: string | null;
+  iso: number | null;
+  aperture: string | null;
+  exposure_time: string | null;
+  focal_length: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  tags: string[];
+  description: string;
+  rating: number;
+  updated_at: string;
+  is_favorite: boolean;
+}
+
+export interface AssetTag {
+  name: string;
+  asset_count: number;
+}
+
+export interface AssetRating {
+  rating: number;
+  asset_count: number;
+}
+
+export interface AssetCamera {
+  camera_key: string;
+  label: string;
+  asset_count: number;
+}
+
+export interface AssetLens {
+  lens_key: string;
+  label: string;
+  asset_count: number;
+}
+
+export interface AssetPlace {
+  place_key: string;
+  label: string;
+  latitude: number;
+  longitude: number;
+  asset_count: number;
+  cover_asset_id: number | null;
+  latest_at: string | null;
+}
+
+export interface PhotoAlbum {
+  id: number;
+  name: string;
+  description: string;
+  asset_count: number;
+  cover_asset_id: number | null;
+  created_at: string;
   updated_at: string;
 }
 
@@ -64,6 +122,8 @@ export interface ShareLink {
   asset_id: number | null;
   folder_id: number | null;
   asset_ids: number[] | null;
+  asset_count: number;
+  share_kind: 'asset' | 'folder' | 'assets';
   expires_at: string | null;
   revoked_at: string | null;
   created_at: string;
@@ -95,6 +155,7 @@ export interface FilesystemEntry {
   group: string | null;
   child_folder_count: number;
   image_count: number;
+  media_count?: number;
 }
 
 export interface FilesystemRoots {
@@ -111,4 +172,5 @@ export interface FilesystemChildren {
   entries: FilesystemEntry[];
   child_folder_count: number;
   image_count: number;
+  media_count?: number;
 }

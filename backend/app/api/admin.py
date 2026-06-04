@@ -8,7 +8,22 @@ from sqlmodel import select
 
 from app.config import settings
 from app.deps import AdminUser, SessionDep
-from app.models import Asset, Folder, LibraryPermission, LibraryRoot, ScanJob, ShareAsset, ShareLink, Thumbnail, User
+from app.models import (
+    Asset,
+    AssetFavorite,
+    AssetMetadata,
+    AssetTag,
+    Folder,
+    LibraryPermission,
+    LibraryRoot,
+    PhotoAlbum,
+    PhotoAlbumAsset,
+    ScanJob,
+    ShareAsset,
+    ShareLink,
+    Thumbnail,
+    User,
+)
 from app.schemas import (
     FilesystemChildren,
     FilesystemRoots,
@@ -25,6 +40,7 @@ from app.schemas import (
     UserUpdate,
 )
 from app.security import hash_password
+from app.api.shares import share_read
 from app.services.filesystem import list_children, list_roots
 from app.services.paths import resolve_library_path
 from app.services.scanner import run_scan_job
@@ -106,6 +122,23 @@ def delete_library(library_id: int, request: Request, session: SessionDep, _: Ad
             session.delete(share)
 
     if asset_ids:
+        favorites = session.exec(select(AssetFavorite).where(AssetFavorite.asset_id.in_(asset_ids))).all()  # type: ignore[attr-defined]
+        for favorite in favorites:
+            session.delete(favorite)
+        tags = session.exec(select(AssetTag).where(AssetTag.asset_id.in_(asset_ids))).all()  # type: ignore[attr-defined]
+        for tag in tags:
+            session.delete(tag)
+        metadata_rows = session.exec(select(AssetMetadata).where(AssetMetadata.asset_id.in_(asset_ids))).all()  # type: ignore[attr-defined]
+        for metadata in metadata_rows:
+            session.delete(metadata)
+
+        album_assets = session.exec(select(PhotoAlbumAsset).where(PhotoAlbumAsset.asset_id.in_(asset_ids))).all()  # type: ignore[attr-defined]
+        for album_asset in album_assets:
+            session.delete(album_asset)
+        cover_albums = session.exec(select(PhotoAlbum).where(PhotoAlbum.cover_asset_id.in_(asset_ids))).all()  # type: ignore[attr-defined]
+        for album in cover_albums:
+            album.cover_asset_id = None
+
         multi_share_assets = session.exec(select(ShareAsset).where(ShareAsset.asset_id.in_(asset_ids))).all()
         affected_share_ids = {sa.share_id for sa in multi_share_assets}
         for sa in multi_share_assets:
@@ -329,5 +362,6 @@ def update_user_permissions(
 
 
 @router.get("/shares", response_model=list[ShareRead])
-def list_shares(session: SessionDep, _: AdminUser) -> list[ShareLink]:
-    return session.exec(select(ShareLink).order_by(ShareLink.created_at.desc())).all()
+def list_shares(session: SessionDep, _: AdminUser) -> list[ShareRead]:
+    shares = session.exec(select(ShareLink).order_by(ShareLink.created_at.desc())).all()
+    return [share_read(session, share) for share in shares]

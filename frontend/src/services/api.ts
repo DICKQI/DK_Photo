@@ -1,11 +1,17 @@
 import type {
   Asset,
+  AssetCamera,
+  AssetLens,
+  AssetPlace,
+  AssetRating,
+  AssetTag,
   FilesystemChildren,
   FilesystemRoots,
   Folder,
   Library,
   LibraryUpdate,
   LibraryPermission,
+  PhotoAlbum,
   PublicShare,
   ScanJob,
   ShareLink,
@@ -26,6 +32,26 @@ async function request<T>(url: string, init: RequestInit = {}): Promise<T> {
     throw new Error(detail.detail || response.statusText);
   }
   return response.json() as Promise<T>;
+}
+
+async function downloadRequest(url: string, init: RequestInit = {}): Promise<Blob> {
+  const response = await fetch(url, {
+    credentials: 'include',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(init.headers ?? {}),
+    },
+    ...init,
+  });
+  if (!response.ok) {
+    const detail = await response.json().catch(() => ({ detail: response.statusText }));
+    throw new Error(detail.detail || response.statusText);
+  }
+  return response.blob();
+}
+
+export async function downloadUrl(url: string): Promise<Blob> {
+  return downloadRequest(url);
 }
 
 export const api = {
@@ -132,16 +158,139 @@ export const api = {
       body: JSON.stringify({ name }),
     });
   },
-  assets(folderId: number | null, search = '', recursive = false) {
+  assets(
+    folderId: number | null,
+    search = '',
+    recursive = false,
+    favoritesOnly = false,
+    options: { sort?: 'name' | 'recent'; limit?: number; mediaType?: 'all' | 'image' | 'video'; hasLocation?: boolean; tag?: string; minRating?: number; camera?: string; lens?: string; place?: string } = {},
+  ) {
     const params = new URLSearchParams();
     if (folderId !== null) params.set('folder_id', String(folderId));
     if (search) params.set('search', search);
     if (recursive) params.set('recursive', 'true');
+    if (favoritesOnly) params.set('favorites_only', 'true');
+    if (options.sort) params.set('sort', options.sort);
+    if (options.limit) params.set('limit', String(options.limit));
+    if (options.mediaType && options.mediaType !== 'all') params.set('media_type', options.mediaType);
+    if (options.hasLocation) params.set('has_location', 'true');
+    if (options.tag) params.set('tag', options.tag);
+    if (options.minRating) params.set('min_rating', String(options.minRating));
+    if (options.camera) params.set('camera', options.camera);
+    if (options.lens) params.set('lens', options.lens);
+    if (options.place) params.set('place', options.place);
     const suffix = params.toString() ? `?${params}` : '';
     return request<Asset[]>(`/api/assets${suffix}`);
   },
   asset(id: number) {
     return request<Asset>(`/api/assets/${id}`);
+  },
+  assetTags() {
+    return request<AssetTag[]>('/api/assets/tags');
+  },
+  assetRatings() {
+    return request<AssetRating[]>('/api/assets/ratings');
+  },
+  assetCameras() {
+    return request<AssetCamera[]>('/api/assets/cameras');
+  },
+  assetLenses() {
+    return request<AssetLens[]>('/api/assets/lenses');
+  },
+  assetPlaces(search = '') {
+    const params = new URLSearchParams();
+    if (search) params.set('search', search);
+    const suffix = params.toString() ? `?${params}` : '';
+    return request<AssetPlace[]>(`/api/assets/places${suffix}`);
+  },
+  updateAssetFavorite(id: number, isFavorite: boolean) {
+    return request<Asset>(`/api/assets/${id}/favorite`, {
+      method: 'PATCH',
+      body: JSON.stringify({ is_favorite: isFavorite }),
+    });
+  },
+  updateAssetTags(id: number, tags: string[]) {
+    return request<Asset>(`/api/assets/${id}/tags`, {
+      method: 'PATCH',
+      body: JSON.stringify({ tags }),
+    });
+  },
+  updateAssetMetadata(id: number, payload: { description: string; rating: number }) {
+    return request<Asset>(`/api/assets/${id}/metadata`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    });
+  },
+  addAssetTags(assetIds: number[], tags: string[]) {
+    return request<Asset[]>('/api/assets/bulk-tags', {
+      method: 'POST',
+      body: JSON.stringify({ asset_ids: assetIds, tags }),
+    });
+  },
+  removeAssetTags(assetIds: number[], tags: string[]) {
+    return request<Asset[]>('/api/assets/bulk-tags/remove', {
+      method: 'POST',
+      body: JSON.stringify({ asset_ids: assetIds, tags }),
+    });
+  },
+  renameAssetTag(name: string, nextName: string) {
+    return request<AssetTag>(`/api/assets/tags/${encodeURIComponent(name)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ name: nextName }),
+    });
+  },
+  deleteAssetTag(name: string) {
+    return request<{ ok: boolean }>(`/api/assets/tags/${encodeURIComponent(name)}`, { method: 'DELETE' });
+  },
+  albums() {
+    return request<PhotoAlbum[]>('/api/albums');
+  },
+  createAlbum(payload: { name: string; description?: string; asset_ids?: number[] }) {
+    return request<PhotoAlbum>('/api/albums', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
+  updateAlbum(albumId: number, payload: { name?: string; description?: string }) {
+    return request<PhotoAlbum>(`/api/albums/${albumId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    });
+  },
+  updateAlbumCover(albumId: number, coverAssetId: number) {
+    return request<PhotoAlbum>(`/api/albums/${albumId}/cover`, {
+      method: 'PATCH',
+      body: JSON.stringify({ cover_asset_id: coverAssetId }),
+    });
+  },
+  addAlbumAssets(albumId: number, assetIds: number[]) {
+    return request<PhotoAlbum>(`/api/albums/${albumId}/assets`, {
+      method: 'POST',
+      body: JSON.stringify({ asset_ids: assetIds }),
+    });
+  },
+  removeAlbumAssets(albumId: number, assetIds: number[]) {
+    return request<PhotoAlbum>(`/api/albums/${albumId}/assets`, {
+      method: 'DELETE',
+      body: JSON.stringify({ asset_ids: assetIds }),
+    });
+  },
+  deleteAlbum(albumId: number) {
+    return request<{ ok: boolean }>(`/api/albums/${albumId}`, { method: 'DELETE' });
+  },
+  albumAssets(albumId: number, search = '', options: { mediaType?: 'all' | 'image' | 'video'; minRating?: number } = {}) {
+    const params = new URLSearchParams();
+    if (search) params.set('search', search);
+    if (options.mediaType && options.mediaType !== 'all') params.set('media_type', options.mediaType);
+    if (options.minRating) params.set('min_rating', String(options.minRating));
+    const suffix = params.toString() ? `?${params}` : '';
+    return request<Asset[]>(`/api/albums/${albumId}/assets${suffix}`);
+  },
+  downloadAssets(assetIds: number[]) {
+    return downloadRequest('/api/assets/download', {
+      method: 'POST',
+      body: JSON.stringify({ asset_ids: assetIds }),
+    });
   },
   createShare(payload: { title?: string; asset_id?: number; folder_id?: number; asset_ids?: number[]; expires_in_days?: number }) {
     return request<ShareLink>('/api/shares', {
@@ -167,6 +316,9 @@ export const api = {
   publicShareAssets(token: string) {
     return request<Asset[]>(`/api/public/shares/${token}/assets`);
   },
+  downloadPublicShare(token: string) {
+    return downloadRequest(publicShareDownloadUrl(token));
+  },
 };
 
 export function thumbnailUrl(assetId: number, size = 'medium') {
@@ -183,4 +335,8 @@ export function publicThumbnailUrl(token: string, assetId: number, size = 'mediu
 
 export function publicOriginalUrl(token: string, assetId: number) {
   return `/api/public/shares/${token}/assets/${assetId}/original`;
+}
+
+export function publicShareDownloadUrl(token: string) {
+  return `/api/public/shares/${token}/download`;
 }

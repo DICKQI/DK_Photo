@@ -67,12 +67,120 @@ class AssetRead(BaseModel):
     folder_id: int
     filename: str
     path: str
+    library_name: Optional[str] = None
+    folder_name: Optional[str] = None
+    folder_path: Optional[str] = None
     mime_type: str
     width: Optional[int]
     height: Optional[int]
     size: int
     mtime: float
     captured_at: Optional[datetime]
+    camera_make: Optional[str] = None
+    camera_model: Optional[str] = None
+    lens_model: Optional[str] = None
+    iso: Optional[int] = None
+    aperture: Optional[str] = None
+    exposure_time: Optional[str] = None
+    focal_length: Optional[str] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    tags: list[str] = Field(default_factory=list)
+    description: str = ""
+    rating: int = Field(default=0, ge=0, le=5)
+    updated_at: datetime
+    is_favorite: bool = False
+
+
+class AssetFavoriteUpdate(BaseModel):
+    is_favorite: bool
+
+
+class AssetMetadataUpdate(BaseModel):
+    description: str = Field(default="", max_length=2000)
+    rating: int = Field(default=0, ge=0, le=5)
+
+
+class AssetTagsUpdate(BaseModel):
+    tags: list[str] = Field(default_factory=list, max_length=30)
+
+
+class AssetTagsBulkAdd(BaseModel):
+    asset_ids: list[int] = Field(min_length=1, max_length=500)
+    tags: list[str] = Field(default_factory=list, max_length=30)
+
+
+class AssetTagsBulkRemove(BaseModel):
+    asset_ids: list[int] = Field(min_length=1, max_length=500)
+    tags: list[str] = Field(default_factory=list, max_length=30)
+
+
+class AssetTagRename(BaseModel):
+    name: str = Field(min_length=1, max_length=40)
+
+
+class AssetTagRead(BaseModel):
+    name: str
+    asset_count: int
+
+
+class AssetRatingRead(BaseModel):
+    rating: int = Field(ge=1, le=5)
+    asset_count: int
+
+
+class AssetCameraRead(BaseModel):
+    camera_key: str
+    label: str
+    asset_count: int
+
+
+class AssetLensRead(BaseModel):
+    lens_key: str
+    label: str
+    asset_count: int
+
+
+class AssetPlaceRead(BaseModel):
+    place_key: str
+    label: str
+    latitude: float
+    longitude: float
+    asset_count: int
+    cover_asset_id: Optional[int] = None
+    latest_at: Optional[datetime] = None
+
+
+class AssetDownloadRequest(BaseModel):
+    asset_ids: list[int] = Field(min_length=1, max_length=500)
+
+
+class AlbumCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    description: str = Field(default="", max_length=500)
+    asset_ids: list[int] = Field(default_factory=list, max_length=500)
+
+
+class AlbumUpdate(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=1, max_length=120)
+    description: Optional[str] = Field(default=None, max_length=500)
+
+
+class AlbumAssetAddRequest(BaseModel):
+    asset_ids: list[int] = Field(min_length=1, max_length=500)
+
+
+class AlbumCoverUpdate(BaseModel):
+    cover_asset_id: int
+
+
+class AlbumRead(BaseModel):
+    id: int
+    name: str
+    description: str
+    asset_count: int = 0
+    cover_asset_id: Optional[int] = None
+    created_at: datetime
     updated_at: datetime
 
 
@@ -126,6 +234,7 @@ class FilesystemEntry(BaseModel):
     group: Optional[str] = None
     child_folder_count: int = 0
     image_count: int = 0
+    media_count: int = 0
 
 
 class FilesystemRoots(BaseModel):
@@ -142,6 +251,7 @@ class FilesystemChildren(BaseModel):
     entries: list[FilesystemEntry]
     child_folder_count: int = 0
     image_count: int = 0
+    media_count: int = 0
 
 
 class ShareCreate(BaseModel):
@@ -159,6 +269,8 @@ class ShareRead(BaseModel):
     asset_id: Optional[int]
     folder_id: Optional[int]
     asset_ids: Optional[list[int]] = None
+    asset_count: int = 0
+    share_kind: str = "assets"
     expires_at: Optional[datetime]
     revoked_at: Optional[datetime]
     created_at: datetime

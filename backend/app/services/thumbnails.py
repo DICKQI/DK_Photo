@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
-from PIL import Image, ImageOps
+from PIL import Image, ImageDraw, ImageOps
 from sqlmodel import Session, select
 
 from app.config import settings
@@ -38,6 +38,17 @@ def ensure_thumbnail(session: Session, asset: Asset, size: str) -> Path:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     max_size = THUMBNAIL_SIZES[size]
 
+    if asset.mime_type.startswith("video/"):
+        width, height = write_video_placeholder(output_path, max_size)
+        if existing:
+            existing.path = str(output_path)
+            existing.width = width
+            existing.height = height
+        else:
+            session.add(Thumbnail(asset_id=asset.id or 0, size=size, path=str(output_path), width=width, height=height))
+        session.commit()
+        return output_path
+
     with Image.open(original_path) as image:
         image = ImageOps.exif_transpose(image)
         if getattr(image, "is_animated", False):
@@ -56,3 +67,34 @@ def ensure_thumbnail(session: Session, asset: Asset, size: str) -> Path:
         session.add(Thumbnail(asset_id=asset.id or 0, size=size, path=str(output_path), width=width, height=height))
     session.commit()
     return output_path
+
+
+def write_video_placeholder(output_path: Path, max_size: tuple[int, int]) -> tuple[int, int]:
+    width, height = max_size
+    image = Image.new("RGB", (width, height), "#172033")
+    draw = ImageDraw.Draw(image)
+    accent = "#7aa7ff"
+    shadow = "#0d111a"
+    triangle_size = max(54, min(width, height) // 5)
+    center_x = width // 2
+    center_y = height // 2
+    points = [
+        (center_x - triangle_size // 3, center_y - triangle_size // 2),
+        (center_x - triangle_size // 3, center_y + triangle_size // 2),
+        (center_x + triangle_size // 2, center_y),
+    ]
+    draw.rounded_rectangle(
+        [
+            center_x - triangle_size,
+            center_y - triangle_size,
+            center_x + triangle_size,
+            center_y + triangle_size,
+        ],
+        radius=max(18, triangle_size // 3),
+        fill=shadow,
+        outline="#334155",
+        width=max(2, triangle_size // 18),
+    )
+    draw.polygon(points, fill=accent)
+    image.save(output_path, "WEBP", quality=82, method=4)
+    return image.size

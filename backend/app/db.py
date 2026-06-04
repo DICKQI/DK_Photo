@@ -31,6 +31,26 @@ def run_lightweight_migrations() -> None:
     if "is_active" not in user_columns:
         with engine.begin() as connection:
             connection.execute(text("ALTER TABLE user ADD COLUMN is_active BOOLEAN NOT NULL DEFAULT 1"))
+    asset_columns = {column["name"] for column in inspector.get_columns("asset")} if inspector.has_table("asset") else set()
+    asset_migrations = {
+        "camera_make": "ALTER TABLE asset ADD COLUMN camera_make VARCHAR",
+        "camera_model": "ALTER TABLE asset ADD COLUMN camera_model VARCHAR",
+        "lens_model": "ALTER TABLE asset ADD COLUMN lens_model VARCHAR",
+        "iso": "ALTER TABLE asset ADD COLUMN iso INTEGER",
+        "aperture": "ALTER TABLE asset ADD COLUMN aperture VARCHAR",
+        "exposure_time": "ALTER TABLE asset ADD COLUMN exposure_time VARCHAR",
+        "focal_length": "ALTER TABLE asset ADD COLUMN focal_length VARCHAR",
+        "latitude": "ALTER TABLE asset ADD COLUMN latitude REAL",
+        "longitude": "ALTER TABLE asset ADD COLUMN longitude REAL",
+    }
+    with engine.begin() as connection:
+        for column, statement in asset_migrations.items():
+            if column not in asset_columns:
+                connection.execute(text(statement))
+    album_columns = {column["name"] for column in inspector.get_columns("photoalbum")} if inspector.has_table("photoalbum") else set()
+    if "cover_asset_id" not in album_columns:
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE photoalbum ADD COLUMN cover_asset_id INTEGER"))
 
 
 def get_session() -> Generator[Session, None, None]:
