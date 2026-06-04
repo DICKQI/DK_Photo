@@ -3,16 +3,27 @@ from __future__ import annotations
 from collections.abc import Generator
 from pathlib import Path
 
-from sqlalchemy import inspect, text
+from sqlalchemy import event, inspect, text
 from sqlmodel import Session, SQLModel, create_engine, select
 
 from app.config import settings
-from app.models import LibraryRoot, User
+from app.models import LibraryRoot, ScanJob, User, utc_now
 from app.security import hash_password
 
 
-connect_args = {"check_same_thread": False}
+connect_args = {"check_same_thread": False, "timeout": 30}
 engine = create_engine(settings.database_url, connect_args=connect_args)
+
+
+@event.listens_for(engine, "connect")
+def configure_sqlite_connection(dbapi_connection, _connection_record) -> None:
+    cursor = dbapi_connection.cursor()
+    try:
+        cursor.execute("PRAGMA busy_timeout=30000")
+        cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute("PRAGMA synchronous=NORMAL")
+    finally:
+        cursor.close()
 
 
 def create_db_and_tables() -> None:
@@ -21,6 +32,7 @@ def create_db_and_tables() -> None:
     SQLModel.metadata.create_all(engine)
     run_lightweight_migrations()
     with Session(engine) as session:
+        mark_interrupted_scan_jobs(session)
         ensure_initial_admin(session)
         ensure_default_library(session)
 
@@ -75,6 +87,18 @@ def run_lightweight_migrations() -> None:
 def get_session() -> Generator[Session, None, None]:
     with Session(engine) as session:
         yield session
+
+
+def mark_interrupted_scan_jobs(session: Session) -> None:
+    jobs = session.exec(select(ScanJob).where(ScanJob.status.in_({"queued", "running"}))).all()  # type: ignore[attr-defined]
+    if not jobs:
+        return
+    now = utc_now()
+    for job in jobs:
+        job.status = "failed"
+        job.message = "Interrupted by server restart"
+        job.finished_at = now
+    session.commit()
 
 
 def ensure_initial_admin(session: Session) -> None:

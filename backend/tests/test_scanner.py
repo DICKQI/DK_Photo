@@ -7,8 +7,10 @@ from PIL import ExifTags, Image, TiffImagePlugin
 from sqlmodel import Session, SQLModel, create_engine, select
 
 from app.config import settings
+from app.db import mark_interrupted_scan_jobs
 from app.models import Asset, Folder, LibraryRoot, ScanJob, Thumbnail
 from app.services.scanner import (
+    active_scan_job,
     is_supported_image,
     is_supported_media,
     is_supported_video,
@@ -153,6 +155,50 @@ def test_scan_job_reports_indexed_media_items(tmp_path: Path) -> None:
         assert updated.total_assets == 2
         assert updated.message == "Indexed 2 media items"
         assert updated.processed_assets == 2
+
+
+def test_active_scan_job_finds_latest_queued_or_running_job(tmp_path: Path) -> None:
+    photo_root = tmp_path / "active-job"
+    photo_root.mkdir()
+
+    with make_session(tmp_path) as session:
+        library = LibraryRoot(name="Active Job", path=str(photo_root.resolve()))
+        session.add(library)
+        session.commit()
+        session.refresh(library)
+
+        session.add(ScanJob(library_id=library.id or 0, status="completed", message="Done"))
+        session.add(ScanJob(library_id=library.id or 0, status="queued", message="Queued"))
+        session.add(ScanJob(library_id=library.id or 0, status="running", message="Running"))
+        session.commit()
+
+        active = active_scan_job(session, library.id or 0)
+        assert active is not None
+        assert active.message == "Running"
+
+
+def test_mark_interrupted_scan_jobs_clears_startup_leftovers(tmp_path: Path) -> None:
+    photo_root = tmp_path / "interrupted-job"
+    photo_root.mkdir()
+
+    with make_session(tmp_path) as session:
+        library = LibraryRoot(name="Interrupted Job", path=str(photo_root.resolve()))
+        session.add(library)
+        session.commit()
+        session.refresh(library)
+
+        session.add(ScanJob(library_id=library.id or 0, status="queued", message="Queued"))
+        session.add(ScanJob(library_id=library.id or 0, status="running", message="Running"))
+        session.add(ScanJob(library_id=library.id or 0, status="completed", message="Done"))
+        session.commit()
+
+        mark_interrupted_scan_jobs(session)
+
+        jobs = session.exec(select(ScanJob).order_by(ScanJob.id)).all()
+        assert [job.status for job in jobs] == ["failed", "failed", "completed"]
+        assert jobs[0].message == "Interrupted by server restart"
+        assert jobs[1].finished_at is not None
+        assert jobs[2].message == "Done"
 
 
 def test_scan_job_preserves_thumbnail_generation_message(tmp_path: Path) -> None:

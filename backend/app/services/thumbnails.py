@@ -5,6 +5,7 @@ import hashlib
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageOps
+from sqlalchemy.exc import OperationalError
 from sqlmodel import Session, select
 
 from app.config import settings
@@ -35,6 +36,8 @@ def _delete_old_thumbnail(existing: Thumbnail, new_path: Path) -> None:
 def ensure_thumbnail(session: Session, asset: Asset, size: str) -> Path:
     if size not in THUMBNAIL_SIZES:
         size = "medium"
+    asset_id = asset.id or 0
+    asset_mime_type = asset.mime_type
     existing = session.exec(select(Thumbnail).where(Thumbnail.asset_id == asset.id, Thumbnail.size == size)).first()
     expected_path = thumbnail_cache_path(asset, size)
 
@@ -48,17 +51,12 @@ def ensure_thumbnail(session: Session, asset: Asset, size: str) -> Path:
     output_path = expected_path
     output_path.parent.mkdir(parents=True, exist_ok=True)
     max_size = THUMBNAIL_SIZES[size]
+    existing_id = existing.id if existing else None
+    session.rollback()
 
-    if asset.mime_type.startswith("video/"):
+    if asset_mime_type.startswith("video/"):
         width, height = write_video_placeholder(output_path, max_size)
-        if existing:
-            _delete_old_thumbnail(existing, output_path)
-            existing.path = str(output_path)
-            existing.width = width
-            existing.height = height
-        else:
-            session.add(Thumbnail(asset_id=asset.id or 0, size=size, path=str(output_path), width=width, height=height))
-        session.commit()
+        _save_thumbnail_record(session, asset_id, size, output_path, width, height, existing_id)
         return output_path
 
     with Image.open(original_path) as image:
@@ -71,15 +69,36 @@ def ensure_thumbnail(session: Session, asset: Asset, size: str) -> Path:
         image.save(output_path, "WEBP", quality=82, method=4)
         width, height = image.size
 
+    _save_thumbnail_record(session, asset_id, size, output_path, width, height, existing_id)
+    return output_path
+
+
+def _save_thumbnail_record(
+    session: Session,
+    asset_id: int,
+    size: str,
+    output_path: Path,
+    width: int,
+    height: int,
+    existing_id: int | None = None,
+) -> None:
+    existing = session.get(Thumbnail, existing_id) if existing_id else None
+    if not existing:
+        existing = session.exec(select(Thumbnail).where(Thumbnail.asset_id == asset_id, Thumbnail.size == size)).first()
     if existing:
         _delete_old_thumbnail(existing, output_path)
         existing.path = str(output_path)
         existing.width = width
         existing.height = height
     else:
-        session.add(Thumbnail(asset_id=asset.id or 0, size=size, path=str(output_path), width=width, height=height))
-    session.commit()
-    return output_path
+        session.add(Thumbnail(asset_id=asset_id, size=size, path=str(output_path), width=width, height=height))
+    try:
+        session.commit()
+    except OperationalError:
+        session.rollback()
+        if output_path.exists():
+            return
+        raise
 
 
 def write_video_placeholder(output_path: Path, max_size: tuple[int, int]) -> tuple[int, int]:

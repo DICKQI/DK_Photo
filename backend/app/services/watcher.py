@@ -10,7 +10,7 @@ from watchdog.observers import Observer
 
 from app.db import engine
 from app.models import LibraryRoot, ScanJob
-from app.services.scanner import run_scan_job
+from app.services.scanner import active_scan_job, run_scan_job
 
 
 class DebouncedScanHandler(FileSystemEventHandler):
@@ -71,7 +71,10 @@ class LibraryWatcher:
         timer.start()
 
     def _create_and_run_job(self, library_id: int) -> None:
+        self.timers.pop(library_id, None)
         with Session(engine) as session:
+            if active_scan_job(session, library_id):
+                return
             job = ScanJob(library_id=library_id, status="queued", message="Filesystem change detected")
             session.add(job)
             session.commit()

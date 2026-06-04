@@ -20,6 +20,7 @@ SUPPORTED_EXTENSIONS = SUPPORTED_IMAGE_EXTENSIONS | SUPPORTED_VIDEO_EXTENSIONS
 
 BATCH_SIZE = 200
 PROGRESS_INTERVAL = 100
+ACTIVE_SCAN_STATUSES = {"queued", "running"}
 
 
 def is_supported_image(path: Path) -> bool:
@@ -32,6 +33,14 @@ def is_supported_video(path: Path) -> bool:
 
 def is_supported_media(path: Path) -> bool:
     return path.suffix.lower() in SUPPORTED_EXTENSIONS
+
+
+def active_scan_job(session: Session, library_id: int) -> ScanJob | None:
+    return session.exec(
+        select(ScanJob)
+        .where(ScanJob.library_id == library_id, ScanJob.status.in_(ACTIVE_SCAN_STATUSES))  # type: ignore[attr-defined]
+        .order_by(ScanJob.id.desc())
+    ).first()
 
 
 def relative_posix(path: Path, root: Path) -> str:
