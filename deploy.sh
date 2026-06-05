@@ -698,19 +698,19 @@ generate_photos_override() {
 migrate_legacy_photos_path() {
     local legacy_path name default_name
 
-    [ -f ".env" ] || return
+    [ -f ".env" ] || return 0
     legacy_path="$(env_get PHOTOS_PATH "")"
     legacy_path="$(trim "$legacy_path")"
-    [ -n "$legacy_path" ] || return
+    [ -n "$legacy_path" ] || return 0
 
     legacy_path="$(expand_host_path "$legacy_path")"
     if [ ! -d "$legacy_path" ]; then
         log_warn "旧 PHOTOS_PATH 指向的目录不存在，未迁移: $legacy_path"
-        return
+        return 0
     fi
 
     if mount_host_exists "$legacy_path"; then
-        return
+        return 0
     fi
 
     default_name="$(suggest_mount_name "$legacy_path")"
