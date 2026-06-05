@@ -1084,6 +1084,7 @@ select:focus {
 }
 
 .album-list-cover {
+  position: relative;
   display: grid;
   width: 22px;
   height: 22px;
@@ -1491,6 +1492,7 @@ select:focus {
 }
 
 .album-status-cover {
+  position: relative;
   display: grid;
   width: 108px;
   aspect-ratio: 1;
@@ -1641,6 +1643,11 @@ select:focus {
   opacity: 0.7;
 }
 
+.load-more-sentinel {
+  grid-column: 1 / -1;
+  height: 1px;
+}
+
 .folder-card,
 .place-card,
 .photo-tile {
@@ -1678,6 +1685,7 @@ select:focus {
 }
 
 .folder-cover {
+  position: relative;
   display: grid;
   aspect-ratio: 4 / 3;
   place-items: center;
@@ -1689,13 +1697,23 @@ select:focus {
 
 .folder-cover img,
 .place-cover img,
-.photo-tile img {
+.album-list-cover img,
+.album-status-cover img,
+.album-card-cover img,
+.photo-tile img,
+.filmstrip-item img,
+.cover-picker-item img,
+.asset-picker-thumb img {
+  position: absolute;
+  inset: 0;
+  display: block;
   width: 100%;
   height: 100%;
   object-fit: cover;
 }
 
 .place-cover {
+  position: relative;
   display: grid;
   aspect-ratio: 4 / 3;
   place-items: center;
@@ -1877,13 +1895,13 @@ select:focus {
 .photo-thumb {
   position: relative;
   display: block;
+  width: 100%;
   aspect-ratio: 1 / 1;
   overflow: hidden;
   background: #eef3fb;
 }
 
 .photo-tile img {
-  aspect-ratio: 1 / 1;
   background: #eef3fb;
 }
 
@@ -2948,6 +2966,13 @@ select:focus {
   background: var(--accent-soft);
   color: var(--accent);
   flex-shrink: 0;
+}
+
+.table-row .row-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent);
 }
 
 .row-icon svg {
@@ -4586,6 +4611,11 @@ select:focus {
   .album-overview-grid {
     grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
     gap: 12px;
+  }
+
+  .photo-thumb.portrait img,
+  .asset-picker-thumb.portrait img {
+    object-fit: contain;
   }
 
   .album-overview {

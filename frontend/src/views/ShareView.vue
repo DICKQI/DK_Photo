@@ -130,7 +130,7 @@
           :style="{ '--tile-index': index }"
         >
           <button class="photo-open" @click="openViewer(index)">
-            <span class="photo-thumb">
+            <span class="photo-thumb" :class="{ portrait: isPortraitAsset(asset) }">
               <img :src="publicThumbnailUrl(token, asset.id, shareThumbnailSize)" :alt="asset.filename" loading="lazy" />
               <span v-if="isVideoAsset(asset)" class="photo-media-badge" :title="t('album.videoAsset')">
                 <Play :size="14" fill="currentColor" />
@@ -306,6 +306,10 @@ function publicThumbnailFor(asset: Asset, size: string) {
 
 function isVideoAsset(asset: Asset) {
   return asset.mime_type.startsWith('video/');
+}
+
+function isPortraitAsset(asset: Asset) {
+  return !isVideoAsset(asset) && Boolean(asset.width && asset.height && asset.height > asset.width);
 }
 
 async function downloadAllOriginals() {

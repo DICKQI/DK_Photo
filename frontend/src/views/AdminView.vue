@@ -93,7 +93,7 @@
           <div v-for="library in filteredLibraries" :key="library.id" class="table-row library-row">
             <div class="row-title">
               <span class="row-icon">
-                <GalleryHorizontal :size="20" />
+                <FolderOpen :size="20" />
               </span>
               <div class="library-row-body">
                 <input
@@ -271,7 +271,7 @@
               <button :class="{ active: jobStatusFilter === 'all' }" @click="jobStatusFilter = 'all'">{{ t('admin.allStatuses') }}</button>
               <button :class="{ active: jobStatusFilter === 'running' }" @click="jobStatusFilter = 'running'">{{ t('admin.statusRunning') }}</button>
               <button :class="{ active: jobStatusFilter === 'queued' }" @click="jobStatusFilter = 'queued'">{{ t('admin.statusQueued') }}</button>
-              <button :class="{ active: jobStatusFilter === 'finished' }" @click="jobStatusFilter = 'finished'">{{ t('admin.statusFinished') }}</button>
+              <button :class="{ active: jobStatusFilter === 'completed' }" @click="jobStatusFilter = 'completed'">{{ t('admin.statusFinished') }}</button>
               <button :class="{ active: jobStatusFilter === 'failed' }" @click="jobStatusFilter = 'failed'">{{ t('admin.statusFailed') }}</button>
             </div>
           </div>
@@ -285,9 +285,9 @@
               <div class="row-title">
                 <span class="row-icon" :class="jobStatusClass(job.status)">
                   <LoaderCircle v-if="job.status === 'running' || job.status === 'queued'" class="spin" :size="20" />
-                  <Radar v-else-if="job.status === 'finished'" :size="20" />
+                  <CircleCheck v-else-if="job.status === 'completed'" :size="20" />
                   <CircleAlert v-else-if="job.status === 'failed'" :size="20" />
-                  <Radar v-else :size="20" />
+                  <CircleCheck v-else :size="20" />
                 </span>
                 <div>
                   <strong>#{{ job.id }} - {{ job.library_id ? libraryNameById(job.library_id) : t('admin.summaryLibraries') }}</strong>
@@ -578,6 +578,7 @@ import {
   CircleCheck,
   Copy,
   FolderSearch,
+  FolderOpen,
   GalleryHorizontal,
   Images,
   KeyRound,
@@ -585,7 +586,6 @@ import {
   Moon,
   Pencil,
   Plus,
-  Radar,
   RefreshCw,
   Save,
   ScanLine,
@@ -621,7 +621,7 @@ const shareSearch = ref('');
 const jobSearch = ref('');
 const userStatusFilter = ref<'all' | 'active' | 'disabled'>('all');
 const userRoleFilter = ref<'all' | 'admin' | 'member'>('all');
-const jobStatusFilter = ref<'all' | 'running' | 'queued' | 'finished' | 'failed'>('all');
+const jobStatusFilter = ref<'all' | 'running' | 'queued' | 'completed' | 'failed'>('all');
 const shareStatusFilter = ref<'all' | 'active' | 'expiring' | 'expired' | 'never' | 'revoked'>('all');
 const editShareTarget = ref<ShareLink | null>(null);
 const editShareTitle = ref('');
@@ -1094,7 +1094,7 @@ function errorMessage(err: unknown, fallback: string) {
 }
 
 function jobStatusClass(status: string) {
-  if (status === 'finished') return 'success';
+  if (status === 'completed') return 'success';
   if (status === 'failed') return 'off';
   if (status === 'running' || status === 'queued') return 'active';
   return 'neutral';
@@ -1251,7 +1251,7 @@ function roleLabel(role: User['role']) {
 }
 
 function jobStatusLabel(status: string) {
-  if (status === 'finished') return t('admin.statusFinished');
+  if (status === 'completed') return t('admin.statusFinished');
   if (status === 'failed') return t('admin.statusFailed');
   if (status === 'running') return t('admin.statusRunning');
   if (status === 'queued') return t('admin.statusQueued');

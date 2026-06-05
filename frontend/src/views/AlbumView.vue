@@ -7,6 +7,10 @@
           <strong>DK Photo</strong>
         </div>
         <div class="sidebar-nav-main">
+          <button class="sidebar-action sidebar-action-primary" :class="{ active: !currentFolder && !favoritesView && !allPhotosView && !recentView && !videosView && !placesView && !currentPlace && !currentTag && !currentRating && !currentCamera && !currentLens && !currentAlbum && !albumOverviewView }" @click="goRoot">
+            <FolderRoot :size="18" />
+            <span class="sidebar-action-label">{{ t('album.allLibraries') }}</span>
+          </button>
           <button class="sidebar-action sidebar-action-primary" :class="{ active: allPhotosView }" @click="openAllPhotosView">
             <Images :size="18" />
             <span class="sidebar-action-label">{{ t('album.allPhotos') }}</span>
@@ -14,10 +18,6 @@
           <button class="sidebar-action sidebar-action-primary" :class="{ active: albumOverviewView }" @click="openAlbumOverviewView">
             <Images :size="18" />
             <span class="sidebar-action-label">{{ t('album.albums') }}</span>
-          </button>
-          <button class="sidebar-action sidebar-action-primary" :class="{ active: !currentFolder && !favoritesView && !allPhotosView && !recentView && !videosView && !placesView && !currentPlace && !currentTag && !currentRating && !currentCamera && !currentLens && !currentAlbum && !albumOverviewView }" @click="goRoot">
-            <FolderRoot :size="18" />
-            <span class="sidebar-action-label">{{ t('album.allLibraries') }}</span>
           </button>
         </div>
         <div class="sidebar-nav-secondary" :aria-label="t('album.smartAlbum')">
@@ -1087,7 +1087,7 @@
         >
           <template v-if="selectionMode">
             <button class="photo-select-overlay" @click="toggleAssetSelection(asset.id, index, $event)">
-              <span class="photo-thumb">
+              <span class="photo-thumb" :class="{ portrait: isPortraitAsset(asset) }">
                 <img :src="thumbnailUrl(asset.id, thumbSize)" :alt="asset.filename" loading="lazy" />
                 <span v-if="isVideoAsset(asset)" class="photo-media-badge" :title="t('album.videoAsset')">
                   <Play :size="14" fill="currentColor" />
@@ -1113,7 +1113,7 @@
           </template>
           <template v-else>
             <button class="photo-open" @click="openViewer(index)">
-              <span class="photo-thumb">
+              <span class="photo-thumb" :class="{ portrait: isPortraitAsset(asset) }">
                 <img :src="thumbnailUrl(asset.id, thumbSize)" :alt="asset.filename" loading="lazy" />
                 <span v-if="isVideoAsset(asset)" class="photo-media-badge" :title="t('album.videoAsset')">
                   <Play :size="14" fill="currentColor" />
@@ -1174,21 +1174,18 @@
           </div>
         </article>
       </section>
-      <button
+      <div
         v-if="canLoadMoreAssets"
-        class="load-more-btn"
-        @click="loadMoreAssets"
-      >
-        {{ t('album.loadMore') }}
-      </button>
-      <button
+        ref="loadMoreSentinel"
+        class="load-more-sentinel"
+      />
+      <div
         v-if="loadingMore && !albumOverviewView"
         class="load-more-btn load-more-btn--loading"
-        disabled
       >
         <LoaderCircle class="spin" :size="16" />
         {{ t('album.loadingPhotos') }}
-      </button>
+      </div>
     </section>
 
     <Teleport to="body">
@@ -1587,7 +1584,7 @@
               :class="{ selected: albumAssetPickerSelectedIds.has(asset.id) }"
               @click="toggleAlbumPickerAsset(asset.id)"
             >
-              <span class="asset-picker-thumb">
+              <span class="asset-picker-thumb" :class="{ portrait: isPortraitAsset(asset) }">
                 <img :src="thumbnailUrl(asset.id, 'small')" :alt="asset.filename" loading="lazy" />
                 <span v-if="isVideoAsset(asset)" class="photo-media-badge" :title="t('album.videoAsset')">
                   <Play :size="14" fill="currentColor" />
@@ -2245,6 +2242,8 @@ let assetRequestId = 0;
 const assetsPageSize = 200;
 const assetsOffset = ref(0);
 const loadingMore = ref(false);
+const loadMoreSentinel = ref<HTMLDivElement | null>(null);
+let loadMoreObserver: IntersectionObserver | null = null;
 let albumAssetPickerSearchTimer: ReturnType<typeof setTimeout> | null = null;
 let albumAssetPickerRequestId = 0;
 
@@ -2663,6 +2662,7 @@ onUnmounted(() => {
   cancelSearchTimer();
   cancelAlbumAssetPickerSearchTimer();
   window.removeEventListener('keydown', handleAlbumKeydown);
+  if (loadMoreObserver) loadMoreObserver.disconnect();
 });
 
 onMounted(async () => {
@@ -2679,6 +2679,20 @@ onMounted(async () => {
     error.value = err instanceof Error ? err.message : t('album.unableLoadApp');
     loading.value = false;
   }
+
+  loadMoreObserver = new IntersectionObserver(
+    (entries) => {
+      if (entries[0]?.isIntersecting) {
+        loadMoreAssets();
+      }
+    },
+    { rootMargin: '200px' },
+  );
+
+  watch(loadMoreSentinel, (el, prevEl) => {
+    if (prevEl) loadMoreObserver!.unobserve(prevEl);
+    if (el) loadMoreObserver!.observe(el);
+  });
 });
 
 async function loadRoot() {
@@ -3883,6 +3897,10 @@ async function setRatingFilter(value: number) {
 
 function isVideoAsset(asset: Asset) {
   return asset.mime_type.startsWith('video/');
+}
+
+function isPortraitAsset(asset: Asset) {
+  return !isVideoAsset(asset) && Boolean(asset.width && asset.height && asset.height > asset.width);
 }
 
 function visibleAssetTags(asset: Asset) {
