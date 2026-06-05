@@ -10,6 +10,7 @@ from watchdog.observers import Observer
 
 from app.db import engine
 from app.models import LibraryRoot, ScanJob
+from app.services.paths import is_docker_photos_root
 from app.services.scanner import active_scan_job, run_scan_job
 
 
@@ -57,7 +58,13 @@ class LibraryWatcher:
             libraries = session.exec(select(LibraryRoot).where(LibraryRoot.is_enabled == True)).all()  # noqa: E712
             for library in libraries:
                 path = Path(library.path)
-                if path.exists() and path.is_dir():
+                if is_docker_photos_root(library.path):
+                    continue
+                try:
+                    is_existing_directory = path.exists() and path.is_dir()
+                except OSError:
+                    continue
+                if is_existing_directory:
                     handler = DebouncedScanHandler(library.id or 0, self.schedule_scan)
                     self.observer.schedule(handler, str(path), recursive=True)
 

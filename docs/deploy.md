@@ -39,7 +39,7 @@ bash deploy.sh
 8. 检查端口占用；如果默认端口被占用，提示输入新的宿主机端口并写回 `.env`。
 9. 构建并启动服务。
 
-照片目录可以在部署完成后运行 `bash deploy.sh photos` 添加。脚本支持多个宿主机目录，并统一挂载到容器内 `/photos/<名称>`。
+照片目录可以在部署完成后运行 `bash deploy.sh photos` 添加。脚本支持多个宿主机目录，并统一挂载到容器内 `/photos/<名称>`。挂载只负责让后端能访问目录，不会自动创建图库或扫描。
 
 > 自动安装 Docker 需要服务器能访问外网，并且当前用户具有 `sudo` 权限。非 Ubuntu/Debian 系统需要先手动安装 Docker 与 Compose 插件。
 
@@ -82,7 +82,7 @@ services:
         read_only: true
 ```
 
-因此管理后台的文件浏览器里应选择容器内路径 `/photos/travel`，而不是宿主机路径 `/mnt/nas/travel`。
+因此管理后台的文件浏览器里应选择容器内路径 `/photos/travel`，而不是宿主机路径 `/mnt/nas/travel`。`/photos` 是 Docker 挂载入口，不要直接添加为图库。
 
 挂载管理器只检查目录是否存在和当前用户是否可读，不会递归扫描照片。照片和视频索引由登录后的管理后台扫描任务完成。
 
@@ -161,7 +161,7 @@ http://203.0.113.50:8080
 | `DK_PHOTO_ADMIN_PASSWORD` | 是 | `change-me-now` | 初始管理员密码，仅首次建库时生效，生产环境务必修改 |
 | `DK_PHOTO_SECRET_KEY` | 是 | 自动生成 | JWT 签名密钥 |
 | `DK_PHOTO_DATA_DIR` | 否 | `/app/data` | 容器内数据目录 |
-| `DK_PHOTO_DEFAULT_LIBRARY_PATH` | 否 | `/photos` | 默认图库在容器内的路径 |
+| `DK_PHOTO_DEFAULT_LIBRARY_PATH` | 否 | 空 | 默认图库路径；Docker 部署不建议设置，避免把 `/photos` 挂载根目录当作图库 |
 | `DK_PHOTO_DEFAULT_LIBRARY_NAME` | 否 | `Family Photos` | 默认图库名称 |
 | `DK_PHOTO_CORS_ORIGINS` | 否 | `http://localhost:5173,http://localhost:8080` | 允许的跨域来源 |
 | `DK_PHOTO_WATCH_ENABLED` | 否 | `true` | 是否启用文件监控自动扫描 |
@@ -175,7 +175,7 @@ http://203.0.113.50:8080
 
 `BACKEND_PORT` 只影响宿主机直接访问后端的端口，例如 `http://localhost:8001/docs`。前端容器内的 `/api` 代理仍通过 Docker 网络访问 `backend:8000`，因此修改 `BACKEND_PORT` 不会破坏前端访问后端。
 
-照片目录不再通过 `.env` 的单个 `PHOTOS_PATH` 配置。请使用 `bash deploy.sh photos` 管理多个照片目录挂载。
+照片目录不再通过 `.env` 的单个 `PHOTOS_PATH` 配置。请使用 `bash deploy.sh photos` 管理多个照片目录挂载。挂载完成后仍需在管理后台手动添加具体子目录为图库，例如 `/photos/travel`。
 
 如果构建时经常出现 npm 包下载超时，可以在 `.env` 中改为：
 
@@ -204,7 +204,7 @@ DK_Photo/
 在 `docker-compose.yml` 中：
 
 - `${APP_DATA_PATH}` 挂载到 `/app/data`，用于数据库和缩略图，读写。
-- 照片目录挂载由 `docker-compose.photos.yml` 追加到 backend 服务，统一位于容器内 `/photos/<名称>`，只读。
+- 照片目录挂载由 `docker-compose.photos.yml` 追加到 backend 服务，统一位于容器内 `/photos/<名称>`，只读。`/photos` 本身只是挂载根目录，不会作为图库扫描。
 
 ## 挂载多个照片目录
 
@@ -216,7 +216,7 @@ DK_Photo/
 /media/disk/raw  -> /photos/raw
 ```
 
-应用挂载并重建后端容器后，在管理后台通过文件浏览器选择对应容器内路径添加图库。不要手动修改主 `docker-compose.yml`；升级时它应保持为项目提供的基础编排文件。
+应用挂载并重建后端容器后，在管理后台通过文件浏览器选择对应容器内路径添加图库。不要直接选择 `/photos`，否则等同于尝试把所有挂载目录作为一个根图库。不要手动修改主 `docker-compose.yml`；升级时它应保持为项目提供的基础编排文件。
 
 ## 日常管理
 

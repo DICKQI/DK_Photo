@@ -8,7 +8,7 @@ from PIL import ExifTags, Image, TiffImagePlugin
 from sqlmodel import Session, SQLModel, create_engine, select
 
 from app.config import settings
-from app.db import mark_interrupted_scan_jobs
+from app.db import disable_legacy_docker_photos_root_library, mark_interrupted_scan_jobs
 from app.models import Asset, Folder, LibraryRoot, ScanJob, Thumbnail
 from app.services.scanner import (
     active_scan_job,
@@ -76,6 +76,33 @@ def test_supported_formats_skip_heic() -> None:
     assert is_supported_video(Path("clip.MOV"))
     assert is_supported_video(Path("clip.mp4"))
     assert is_supported_media(Path("clip.mp4"))
+
+
+def test_scan_library_skips_docker_photos_mount_root(tmp_path: Path) -> None:
+    with make_session(tmp_path) as session:
+        library = LibraryRoot(name="Docker mount root", path="/photos")
+        session.add(library)
+        session.commit()
+        session.refresh(library)
+
+        total = scan_library(session, library.id or 0)
+
+        assert total == 0
+        assert session.exec(select(Folder)).all() == []
+        assert session.exec(select(Asset)).all() == []
+
+
+def test_legacy_empty_docker_photos_library_is_disabled(tmp_path: Path) -> None:
+    with make_session(tmp_path) as session:
+        library = LibraryRoot(name="Family Photos", path="/photos", is_enabled=True)
+        session.add(library)
+        session.commit()
+        session.refresh(library)
+
+        disable_legacy_docker_photos_root_library(session)
+        session.refresh(library)
+
+        assert library.is_enabled is False
 
 
 def test_scan_library_creates_folders_and_assets(tmp_path: Path) -> None:

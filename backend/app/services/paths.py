@@ -5,9 +5,32 @@ from pathlib import Path
 from fastapi import HTTPException, status
 
 
+def is_docker_photos_root(path: str | Path) -> bool:
+    normalized = str(path).replace("\\", "/").rstrip("/")
+    if normalized == "/photos":
+        return True
+    try:
+        resolved = Path(path).expanduser().resolve()
+    except OSError:
+        return False
+    return resolved.as_posix().rstrip("/") == "/photos"
+
+
 def resolve_library_path(path: str) -> Path:
-    resolved = Path(path).expanduser().resolve()
-    if not resolved.exists() or not resolved.is_dir():
+    try:
+        resolved = Path(path).expanduser().resolve()
+    except OSError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Library path is not accessible") from exc
+    if is_docker_photos_root(path) or is_docker_photos_root(resolved):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="/photos is only the Docker mount root. Choose a mounted subdirectory such as /photos/travel.",
+        )
+    try:
+        is_existing_directory = resolved.exists() and resolved.is_dir()
+    except OSError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Library path is not accessible") from exc
+    if not is_existing_directory:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Library path must be an existing directory")
     return resolved
 

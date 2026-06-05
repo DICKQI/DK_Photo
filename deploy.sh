@@ -722,6 +722,20 @@ migrate_legacy_photos_path() {
     log_warn "已将旧 PHOTOS_PATH 迁移为照片挂载: ${legacy_path} -> /photos/${name}"
 }
 
+migrate_docker_default_library_path() {
+    local default_path normalized_path
+
+    [ -f ".env" ] || return 0
+    default_path="$(env_get DK_PHOTO_DEFAULT_LIBRARY_PATH "")"
+    default_path="$(trim "$default_path")"
+    normalized_path="${default_path%/}"
+
+    if [ "$normalized_path" = "/photos" ]; then
+        env_set DK_PHOTO_DEFAULT_LIBRARY_PATH ""
+        log_warn "已清空旧 DK_PHOTO_DEFAULT_LIBRARY_PATH=/photos；/photos 现在仅作为挂载入口，不会自动创建或扫描图库。"
+    fi
+}
+
 list_photo_mounts() {
     local name host status
     local index=1
@@ -915,6 +929,7 @@ manage_photo_mounts() {
     ensure_mounts_file
     if [ -f ".env" ]; then
         migrate_legacy_photos_path
+        migrate_docker_default_library_path
     else
         log_warn "未检测到 .env。建议先运行初始化部署；也可以先维护挂载清单，部署时会自动应用。"
     fi
@@ -1033,6 +1048,8 @@ else
     log_info ".env 文件已存在。"
 fi
 
+migrate_docker_default_library_path
+
 APP_DATA_PATH="$(env_get APP_DATA_PATH "./data")"
 FRONTEND_BIND="$(env_get FRONTEND_BIND "0.0.0.0")"
 FRONTEND_PORT="$(env_get FRONTEND_PORT "8080")"
@@ -1041,6 +1058,7 @@ BACKEND_PORT="$(env_get BACKEND_PORT "8000")"
 
 ensure_mounts_file
 migrate_legacy_photos_path
+migrate_docker_default_library_path
 generate_photos_override
 
 if [ -f "${APP_DATA_PATH}/dk_photo.sqlite3" ]; then

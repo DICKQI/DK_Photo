@@ -62,7 +62,7 @@
         <form class="library-form" @submit.prevent="createLibrary">
           <input v-model="libraryName" :placeholder="t('admin.libraryName')" required />
           <div class="path-input-wrap">
-            <input v-model="libraryPath" placeholder="C:\\Photos or /photos" required />
+            <input v-model="libraryPath" placeholder="C:\\Photos or /photos/travel" required />
             <button class="icon-button" type="button" :title="t('admin.selectFolder')" @click="showDirectoryPicker = true">
               <FolderSearch :size="17" />
             </button>
@@ -623,7 +623,7 @@ const jobs = ref<ScanJob[]>([]);
 const users = ref<User[]>([]);
 const shares = ref<ShareLink[]>([]);
 const libraryName = ref('Family Photos');
-const libraryPath = ref('/photos');
+const libraryPath = ref('');
 const message = ref('');
 const messageKind = ref<'success' | 'error'>('success');
 const librarySearch = ref('');

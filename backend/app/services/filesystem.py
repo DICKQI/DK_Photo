@@ -124,7 +124,7 @@ def _recommended_locations() -> list[FilesystemEntry]:
 
     if os.name != "nt":
         for candidate, name, group in [
-            (Path("/photos"), "Docker /photos", "Recommended"),
+            (Path("/photos"), "Docker /photos mount root", "Recommended"),
             (Path("/mnt"), "/mnt", "Mount points"),
             (Path("/media"), "/media", "Mount points"),
         ]:

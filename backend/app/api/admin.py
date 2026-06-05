@@ -45,7 +45,7 @@ from app.schemas import (
 from app.security import hash_password
 from app.api.shares import share_read
 from app.services.filesystem import list_children, list_roots
-from app.services.paths import resolve_library_path
+from app.services.paths import is_docker_photos_root, resolve_library_path
 from app.services.scanner import active_scan_job, request_cancel_scan_job, run_scan_job
 
 
@@ -204,7 +204,18 @@ def scan_library_endpoint(
     library = session.get(LibraryRoot, library_id)
     if not library:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Library not found")
-    if not Path(library.path).exists():
+    if not library.is_enabled:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Library is disabled")
+    if is_docker_photos_root(library.path):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="/photos is only the Docker mount root. Choose a mounted subdirectory such as /photos/travel.",
+        )
+    try:
+        path_exists = Path(library.path).exists()
+    except OSError:
+        path_exists = False
+    if not path_exists:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Library path does not exist")
     existing_job = active_scan_job(session, library_id)
     if existing_job:

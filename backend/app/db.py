@@ -7,8 +7,9 @@ from sqlalchemy import event, inspect, text
 from sqlmodel import Session, SQLModel, create_engine, select
 
 from app.config import settings
-from app.models import LibraryRoot, ScanJob, User, utc_now
+from app.models import Asset, Folder, LibraryRoot, ScanJob, User, utc_now
 from app.security import hash_password
+from app.services.paths import is_docker_photos_root
 
 
 connect_args = {"check_same_thread": False, "timeout": 30}
@@ -34,6 +35,7 @@ def create_db_and_tables() -> None:
     with Session(engine) as session:
         mark_interrupted_scan_jobs(session)
         ensure_initial_admin(session)
+        disable_legacy_docker_photos_root_library(session)
         ensure_default_library(session)
 
 
@@ -120,6 +122,8 @@ def ensure_initial_admin(session: Session) -> None:
 def ensure_default_library(session: Session) -> None:
     if not settings.default_library_path:
         return
+    if is_docker_photos_root(settings.default_library_path):
+        return
     path = Path(settings.default_library_path).resolve()
     if not path.exists() or not path.is_dir():
         return
@@ -128,3 +132,20 @@ def ensure_default_library(session: Session) -> None:
         return
     session.add(LibraryRoot(name=settings.default_library_name, path=str(path), is_enabled=True))
     session.commit()
+
+
+def disable_legacy_docker_photos_root_library(session: Session) -> None:
+    libraries = session.exec(select(LibraryRoot).where(LibraryRoot.is_enabled == True)).all()  # noqa: E712
+    changed = False
+    for library in libraries:
+        if library.id is None or not is_docker_photos_root(library.path):
+            continue
+        has_assets = session.exec(select(Asset.id).where(Asset.library_id == library.id).limit(1)).first()
+        has_folders = session.exec(select(Folder.id).where(Folder.library_id == library.id).limit(1)).first()
+        if has_assets or has_folders:
+            continue
+        library.is_enabled = False
+        session.add(library)
+        changed = True
+    if changed:
+        session.commit()

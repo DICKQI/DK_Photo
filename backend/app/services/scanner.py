@@ -13,6 +13,7 @@ from sqlalchemy import func
 from sqlmodel import Session, select
 
 from app.models import Asset, Folder, LibraryRoot, PhotoAlbum, PhotoAlbumAsset, ScanJob, Thumbnail, utc_now
+from app.services.paths import is_docker_photos_root
 
 
 SUPPORTED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
@@ -438,8 +439,14 @@ def scan_library(
     library = session.get(LibraryRoot, library_id)
     if not library or not library.is_enabled:
         return 0
-    root = Path(library.path).resolve()
-    if not root.exists() or not root.is_dir():
+    if is_docker_photos_root(library.path):
+        return 0
+    try:
+        root = Path(library.path).resolve()
+        is_existing_directory = root.exists() and root.is_dir()
+    except OSError:
+        return 0
+    if not is_existing_directory:
         return 0
 
     folder_cache: dict[str, Folder] = {}

@@ -172,7 +172,7 @@
       <footer class="modal-actions directory-actions">
         <label class="manual-path">
           <span>{{ t('directory.manualPath') }}</span>
-          <input v-model="manualPath" placeholder="C:\\Photos or /photos" />
+          <input v-model="manualPath" placeholder="C:\\Photos or /photos/travel" />
         </label>
         <button class="secondary-button" @click="$emit('close')">{{ t('common.cancel') }}</button>
         <button class="primary-button" :disabled="!manualPath" @click="choose(manualPath)">
