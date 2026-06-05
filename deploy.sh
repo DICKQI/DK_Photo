@@ -849,7 +849,7 @@ check_photo_mounts() {
     log_step "检查照片目录"
     if [ "$(count_photo_mounts)" -eq 0 ]; then
         log_info "尚未配置照片目录。"
-        return
+        return 0
     fi
 
     while IFS=$'\t' read -r name host || [ -n "${name}${host}" ]; do
@@ -871,18 +871,37 @@ check_photo_mounts() {
     if [ "$has_problem" -eq 0 ]; then
         log_info "照片目录检查完成。"
     fi
+
+    return "$has_problem"
 }
 
 apply_photo_mounts() {
     generate_photos_override
-    ensure_docker
 
     log_step "应用照片目录挂载"
+    if [ ! -f ".env" ]; then
+        log_warn "未检测到 .env。请先运行 bash deploy.sh deploy 完成初始化部署。"
+        return
+    fi
+
+    ensure_docker
+
+    if [ "$(count_photo_mounts)" -gt 0 ]; then
+        if ! check_photo_mounts; then
+            log_error "照片目录检查未通过，已取消应用挂载。请修复路径或删除无效挂载后重试。"
+            return 1
+        fi
+    fi
+
     if compose_cmd ps --quiet 2>/dev/null | grep -q .; then
+        compose_cmd up -d --force-recreate backend
+        compose_cmd up -d frontend
+        log_info "已重建 backend 容器并应用照片目录挂载。"
+    elif prompt_yes_no "当前没有运行中的 DK Photo 容器。是否现在启动服务并应用挂载?" "y"; then
         compose_cmd up -d
-        log_info "已应用挂载配置。"
+        log_info "已启动服务并应用照片目录挂载。"
     else
-        log_warn "当前没有运行中的 DK Photo 容器。下次初始化/更新部署时会自动应用挂载。"
+        log_warn "未启动容器。下次初始化/更新部署时会自动应用挂载。"
     fi
 
     log_info "所有外部目录都会显示在容器内 /photos 下。"
@@ -908,14 +927,14 @@ manage_photo_mounts() {
         echo "2) 删除目录"
         echo "3) 列出目录"
         echo "4) 检查目录"
-        echo "5) 应用并重启容器"
+        echo "5) 应用挂载并重建后端容器"
         echo "0) 返回"
         read -r -p "请选择 [1-5,0]: " choice
         case "$choice" in
             1) add_photo_mount ;;
             2) delete_photo_mount ;;
             3) list_photo_mounts ;;
-            4) check_photo_mounts ;;
+            4) check_photo_mounts || true ;;
             5) apply_photo_mounts ;;
             0) return ;;
             *) log_warn "请输入 0-5。" ;;
@@ -1064,7 +1083,10 @@ log_info "数据目录就绪: $APP_DATA_PATH"
 if [ "$(count_photo_mounts)" -eq 0 ]; then
     log_warn "尚未配置外部照片目录。部署完成后可运行 bash deploy.sh photos 添加目录。"
 else
-    check_photo_mounts
+    if ! check_photo_mounts; then
+        log_error "照片目录检查未通过，已取消部署。请修复路径或删除无效挂载后重试。"
+        exit 1
+    fi
 fi
 
 # -----------------------------------------------------------

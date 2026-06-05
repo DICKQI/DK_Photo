@@ -31,14 +31,49 @@ DK Photo 是一个自托管的私有家庭相册中心，基于 Vue 3 和 FastAP
 
 ## 快速开始
 
-推荐使用交互式部署脚本：
+推荐使用部署脚本一键完成初始化和启动：
 
 ```bash
+git clone <your-repo-url> DK_Photo
+cd DK_Photo
 bash deploy.sh
 ```
 
-首次部署时脚本会创建 `.env`、初始化管理员显示名称/邮箱/密码、生成 `DK_PHOTO_SECRET_KEY`，并通过 Docker Compose 构建启动服务。
-首次部署可以先不配置照片目录。部署完成后运行 `bash deploy.sh photos`，把一个或多个宿主机照片目录挂载到容器内的 `/photos/<名称>`。
+脚本启动后选择：
+
+```text
+1) 初始化/更新部署
+```
+
+也可以直接运行：
+
+```bash
+bash deploy.sh deploy
+```
+
+首次部署时脚本会创建 `.env`、初始化管理员显示名称/邮箱/密码、生成 `DK_PHOTO_SECRET_KEY`、检查端口占用，并通过 Docker Compose 构建启动服务。在 Ubuntu/Debian 上如果未安装 Docker，脚本会询问是否自动安装 Docker Engine 和 Compose 插件。
+
+部署完成后，终端会显示本机、局域网和公网访问地址，以及管理员账号信息。打开显示的前端地址，例如：
+
+```text
+http://localhost:8080
+```
+
+首次部署可以先不配置照片目录。服务启动后如需添加照片源，运行：
+
+```bash
+bash deploy.sh photos
+```
+
+选择“添加目录”，把宿主机照片目录挂载到容器内 `/photos/<名称>`，再选择“应用挂载并重建后端容器”。登录 DK Photo 后，在管理后台添加图库时选择容器内路径，例如 `/photos/travel`，然后触发扫描。
+
+常用脚本命令：
+
+```bash
+bash deploy.sh deploy   # 初始化/更新部署
+bash deploy.sh photos   # 管理照片目录挂载
+bash deploy.sh config   # 查看当前配置和 Compose 命令
+```
 
 也可以手动复制 `.env.example` 为 `.env` 后运行：
 
@@ -46,7 +81,7 @@ bash deploy.sh
 docker compose up -d --build
 ```
 
-打开 `http://localhost:8080`，使用管理员账号登录。登录后进入管理页面对默认图库进行扫描，或添加其他挂载的文件夹。
+如果已经通过 `bash deploy.sh photos` 生成了 `docker-compose.photos.yml`，请使用 `bash deploy.sh config` 显示的完整 Compose 命令管理容器。
 
 > 文件夹选择器显示的是后端进程可见的目录。在 Docker 环境中，这些是容器内路径（如 `/photos/travel`）；请先运行 `bash deploy.sh photos` 挂载宿主机目录，再在管理页选择对应的容器路径。添加图库时设置的名称会作为此图库根文件夹的名称。
 
