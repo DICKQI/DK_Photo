@@ -32,12 +32,14 @@ bash deploy.sh
 1. 检查 Docker Engine 和 Docker Compose 插件。
 2. 如果 Ubuntu/Debian 上未安装 Docker，询问是否自动安装。
 3. 创建 `.env`。
-4. 配置 Docker 可访问的宿主机照片目录和数据目录。
+4. 配置应用数据目录、端口等部署参数。
 5. 首次部署时初始化管理员显示名称、邮箱和密码。
 6. 自动生成 `DK_PHOTO_SECRET_KEY`。
-7. 创建数据目录和照片目录。
+7. 创建数据目录。
 8. 检查端口占用；如果默认端口被占用，提示输入新的宿主机端口并写回 `.env`。
 9. 构建并启动服务。
+
+照片目录可以在部署完成后运行 `bash deploy.sh photos` 添加。脚本支持多个宿主机目录，并统一挂载到容器内 `/photos/<名称>`。
 
 > 自动安装 Docker 需要服务器能访问外网，并且当前用户具有 `sudo` 权限。非 Ubuntu/Debian 系统需要先手动安装 Docker 与 Compose 插件。
 
@@ -53,28 +55,36 @@ bash deploy.sh
 
 如果 `APP_DATA_PATH/dk_photo.sqlite3` 已存在，脚本不会用 `.env` 覆盖已有管理员。已有账号请在应用后台修改。
 
-## 快速配置可访问目录
+## 配置照片目录挂载
 
-Docker 容器不能直接访问宿主机任意目录，必须通过 volume 映射。最简单的方式是在首次运行 `bash deploy.sh` 时按提示输入：
+Docker 容器不能直接访问宿主机任意目录，必须通过 volume 映射。部署完成后运行：
+
+```bash
+bash deploy.sh photos
+```
+
+进入照片目录挂载管理器后，可以添加、删除、列出、检查并应用挂载。添加目录时输入宿主机真实目录和容器内显示名称：
 
 ```text
-Host photos directory [/opt/DK_Photo/photos]: /mnt/nas/family-photos
-App data directory [/opt/DK_Photo/data]: /opt/dk-photo-data
+宿主机照片目录: /mnt/nas/travel
+容器内显示名称 [/photos/travel]:
 ```
 
-脚本会写入 `.env`：
+脚本会维护 `.dk-photo-photo-mounts`，并自动生成 `docker-compose.photos.yml`：
 
-```env
-PHOTOS_PATH=/mnt/nas/family-photos
-APP_DATA_PATH=/opt/dk-photo-data
+```yaml
+services:
+  backend:
+    volumes:
+      - type: bind
+        source: /mnt/nas/travel
+        target: /photos/travel
+        read_only: true
 ```
 
-Compose 会把它们映射为：
+因此管理后台的文件浏览器里应选择容器内路径 `/photos/travel`，而不是宿主机路径 `/mnt/nas/travel`。
 
-- 宿主机 `${PHOTOS_PATH}` → 容器 `/photos`，只读，用于照片库
-- 宿主机 `${APP_DATA_PATH}` → 容器 `/app/data`，读写，用于数据库和缩略图
-
-因此管理后台的文件浏览器里应选择容器内路径 `/photos`，而不是宿主机路径 `/mnt/nas/family-photos`。
+挂载管理器只检查目录是否存在和当前用户是否可读，不会递归扫描照片。照片和视频索引由登录后的管理后台扫描任务完成。
 
 ## 手动部署
 
@@ -86,6 +96,8 @@ docker compose ps
 ```
 
 打开 `http://<服务器IP>:8080`，使用 `.env` 中配置的管理员账号登录。
+
+如果需要照片目录挂载，推荐仍使用 `bash deploy.sh photos` 生成 `docker-compose.photos.yml`，然后用脚本显示的 Compose 命令启动或重启服务。
 
 ## 部署后访问相册
 
@@ -154,7 +166,6 @@ http://203.0.113.50:8080
 | `DK_PHOTO_CORS_ORIGINS` | 否 | `http://localhost:5173,http://localhost:8080` | 允许的跨域来源 |
 | `DK_PHOTO_WATCH_ENABLED` | 否 | `true` | 是否启用文件监控自动扫描 |
 | `DK_PHOTO_ACCESS_TOKEN_MINUTES` | 否 | `10080` | JWT 过期时间，单位分钟 |
-| `PHOTOS_PATH` | 是 | `./photos` | 宿主机照片目录，生产环境建议使用绝对路径 |
 | `APP_DATA_PATH` | 否 | `./data` | 宿主机数据目录 |
 | `FRONTEND_BIND` | 否 | `0.0.0.0` | 前端监听地址 |
 | `FRONTEND_PORT` | 否 | `8080` | 前端宿主机端口 |
@@ -163,6 +174,8 @@ http://203.0.113.50:8080
 | `NPM_REGISTRY` | 否 | `https://registry.npmjs.org/` | 前端 Docker 构建时使用的 npm registry |
 
 `BACKEND_PORT` 只影响宿主机直接访问后端的端口，例如 `http://localhost:8001/docs`。前端容器内的 `/api` 代理仍通过 Docker 网络访问 `backend:8000`，因此修改 `BACKEND_PORT` 不会破坏前端访问后端。
+
+照片目录不再通过 `.env` 的单个 `PHOTOS_PATH` 配置。请使用 `bash deploy.sh photos` 管理多个照片目录挂载。
 
 如果构建时经常出现 npm 包下载超时，可以在 `.env` 中改为：
 
@@ -178,11 +191,12 @@ NPM_REGISTRY=https://registry.npmmirror.com
 DK_Photo/
 ├── .env
 ├── docker-compose.yml
+├── docker-compose.photos.yml
+├── .dk-photo-photo-mounts
 ├── deploy.sh
 ├── data/
 │   ├── dk_photo.sqlite3
 │   └── thumbnails/
-├── photos/
 ├── backend/
 └── frontend/
 ```
@@ -190,21 +204,19 @@ DK_Photo/
 在 `docker-compose.yml` 中：
 
 - `${APP_DATA_PATH}` 挂载到 `/app/data`，用于数据库和缩略图，读写。
-- `${PHOTOS_PATH}` 挂载到 `/photos`，用于照片库，只读。
+- 照片目录挂载由 `docker-compose.photos.yml` 追加到 backend 服务，统一位于容器内 `/photos/<名称>`，只读。
 
 ## 挂载多个照片目录
 
-默认脚本只挂载一个照片目录。如果需要多个目录，可以在 `docker-compose.yml` 的 `backend.volumes` 中追加：
+运行 `bash deploy.sh photos`，选择“添加目录”，为每个宿主机目录指定一个容器内显示名称：
 
-```yaml
-volumes:
-  - ${APP_DATA_PATH:-./data}:/app/data
-  - ${PHOTOS_PATH:-./photos}:/photos:ro
-  - /mnt/nas/family:/mnt/photos/family:ro
-  - /mnt/nas/travel:/mnt/photos/travel:ro
+```text
+/mnt/nas/family  -> /photos/family
+/mnt/nas/travel  -> /photos/travel
+/media/disk/raw  -> /photos/raw
 ```
 
-重启后，在管理后台通过文件浏览器选择对应容器内路径添加图库。
+应用挂载并重启容器后，在管理后台通过文件浏览器选择对应容器内路径添加图库。不要手动修改主 `docker-compose.yml`；升级时它应保持为项目提供的基础编排文件。
 
 ## 日常管理
 
@@ -217,7 +229,7 @@ docker compose down
 docker compose up -d --build
 ```
 
-如果脚本提示当前用户需要 `sudo docker`，上面的命令也相应改成 `sudo docker compose ...`。
+如果已经生成 `docker-compose.photos.yml`，请使用 `bash deploy.sh config` 显示的完整 Compose 命令，例如 `docker compose -f docker-compose.yml -f docker-compose.photos.yml ...`。如果脚本提示当前用户需要 `sudo docker`，命令也相应改成 `sudo docker compose ...`。
 
 ## 升级更新
 
@@ -242,7 +254,7 @@ tar -czf dk-photo-backup-$(date +%Y%m%d).tar.gz data/
 ```bash
 docker compose down
 tar -xzf dk-photo-backup-YYYYMMDD.tar.gz
-docker compose up -d
+bash deploy.sh deploy
 ```
 
 ## 安全建议
@@ -283,9 +295,9 @@ docker compose logs frontend
 
 ### 照片不显示
 
-1. 确认 `PHOTOS_PATH` 指向正确目录。
-2. 确认目录中存在支持的图片或视频。
-3. 进入容器检查挂载：`docker compose exec backend ls /photos`
+1. 运行 `bash deploy.sh photos`，检查宿主机目录是否存在且可读。
+2. 进入容器检查挂载：`docker compose exec backend ls /photos`
+3. 在管理后台选择容器内路径，例如 `/photos/travel`。
 4. 登录后在管理后台触发扫描。
 
 支持格式：JPEG / PNG / WebP / GIF / MP4 / MOV / WebM / AVI / MKV。

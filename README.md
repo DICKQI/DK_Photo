@@ -38,7 +38,7 @@ bash deploy.sh
 ```
 
 首次部署时脚本会创建 `.env`、初始化管理员显示名称/邮箱/密码、生成 `DK_PHOTO_SECRET_KEY`，并通过 Docker Compose 构建启动服务。
-脚本也会提示配置宿主机照片目录，并将它映射为容器内的 `/photos`。
+首次部署可以先不配置照片目录。部署完成后运行 `bash deploy.sh photos`，把一个或多个宿主机照片目录挂载到容器内的 `/photos/<名称>`。
 
 也可以手动复制 `.env.example` 为 `.env` 后运行：
 
@@ -48,7 +48,19 @@ docker compose up -d --build
 
 打开 `http://localhost:8080`，使用管理员账号登录。登录后进入管理页面对默认图库进行扫描，或添加其他挂载的文件夹。
 
-> 文件夹选择器显示的是后端进程可见的目录。在 Docker 环境中，这些是容器内路径（如 `/photos`）；请先在 `docker-compose.yml` 中挂载宿主机目录，再在管理页选择。添加图库时设置的名称会作为此图库根文件夹的名称。
+> 文件夹选择器显示的是后端进程可见的目录。在 Docker 环境中，这些是容器内路径（如 `/photos/travel`）；请先运行 `bash deploy.sh photos` 挂载宿主机目录，再在管理页选择对应的容器路径。添加图库时设置的名称会作为此图库根文件夹的名称。
+
+## Docker 照片目录挂载
+
+Docker 容器不能直接访问宿主机任意目录。使用脚本的照片目录挂载管理器添加目录：
+
+```bash
+bash deploy.sh photos
+```
+
+脚本会维护 `.dk-photo-photo-mounts` 并生成 `docker-compose.photos.yml`。例如宿主机目录 `/mnt/nas/travel` 可以映射为容器内 `/photos/travel`。后台添加图库时请选择 `/photos/travel`，不要填写宿主机路径。
+
+挂载管理只检查目录是否存在和可读，不会递归扫描照片；索引由登录后的管理后台扫描任务完成。
 
 ## 本地开发
 
@@ -85,7 +97,6 @@ Vite 开发服务器会将 `/api` 请求代理到 `http://localhost:8000`。
 | `DK_PHOTO_DEFAULT_LIBRARY_NAME` | `Family Photos` | 自动创建图库时的名称 |
 | `DK_PHOTO_CORS_ORIGINS` | `http://localhost:5173,http://localhost:8080` | 允许的 CORS 来源，逗号分隔 |
 | `DK_PHOTO_WATCH_ENABLED` | `true` | 是否启用 watchdog 文件监控自动扫描 |
-| `PHOTOS_PATH` | `./photos` | Docker 宿主机照片目录 |
 | `APP_DATA_PATH` | `./data` | Docker 宿主机数据目录 |
 | `FRONTEND_BIND` | `0.0.0.0` | 前端监听地址 |
 | `FRONTEND_PORT` | `8080` | 前端宿主机端口 |

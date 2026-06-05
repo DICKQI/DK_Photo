@@ -13,6 +13,8 @@ coverage/
 *.tsbuildinfo
 
 .env
+docker-compose.photos.yml
+.dk-photo-photo-mounts
 data/
 backend/data/
 frontend/dist/
