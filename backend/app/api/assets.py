@@ -609,7 +609,7 @@ def get_thumbnail(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found")
     require_asset_access(session, current_user, asset)
     thumbnail = ensure_thumbnail(session, asset, size)
-    return FileResponse(thumbnail, media_type="image/webp")
+    return FileResponse(thumbnail, media_type="image/webp", headers={"Cache-Control": "private, max-age=31536000, immutable"})
 
 
 def current_user_favorite_asset_ids(session: SessionDep, current_user: CurrentUser) -> set[int]:

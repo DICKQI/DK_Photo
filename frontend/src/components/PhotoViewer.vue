@@ -1,5 +1,11 @@
 <template>
-  <div class="viewer" :class="{ 'info-collapsed': !showInfo }" @keydown.esc="$emit('close')" tabindex="0" ref="viewerRef">
+  <div
+    class="viewer"
+    :class="{ 'info-collapsed': !showInfo, 'filmstrip-expanded': filmstripExpanded }"
+    @keydown.esc="$emit('close')"
+    tabindex="0"
+    ref="viewerRef"
+  >
     <header class="viewer-bar">
       <button class="viewer-icon" @click="$emit('close')" :title="t('viewer.close')">
         <X :size="22" />
@@ -153,17 +159,59 @@
     <button class="viewer-nav right" @click="next" :title="t('viewer.next')">
       <ChevronRight :size="28" />
     </button>
-    <div class="viewer-filmstrip" ref="filmstripRef">
-      <button
-        v-for="(asset, assetIndex) in assets"
-        :key="asset.id"
-        class="filmstrip-item"
-        :class="{ active: assetIndex === index }"
-        :title="asset.filename"
-        @click="goTo(assetIndex)"
-      >
-        <img :src="assetThumbnailUrl(asset, 'small')" :alt="asset.filename" loading="lazy" />
-      </button>
+    <div class="viewer-filmstrip" :class="{ expanded: filmstripExpanded }">
+      <div class="viewer-filmstrip-summary">
+        <span class="viewer-filmstrip-status">{{ metaText }}</span>
+        <button
+          v-if="hasMultipleAssets"
+          class="viewer-icon compact filmstrip-toggle"
+          :class="{ active: filmstripExpanded }"
+          type="button"
+          :title="filmstripExpanded ? t('viewer.hidePreviewStrip') : t('viewer.showPreviewStrip')"
+          :aria-label="filmstripExpanded ? t('viewer.hidePreviewStrip') : t('viewer.showPreviewStrip')"
+          :aria-expanded="filmstripExpanded"
+          @click="toggleFilmstrip"
+        >
+          <Images :size="16" />
+        </button>
+      </div>
+      <template v-if="filmstripExpanded">
+        <div
+          class="viewer-filmstrip-track"
+          :class="{ dragging: filmstripDragging, scrollable: filmstripScrollable }"
+          ref="filmstripRef"
+          @scroll="updateFilmstripScroll"
+          @pointerdown="handleFilmstripPointerDown"
+          @pointermove="handleFilmstripPointerMove"
+          @pointerup="endFilmstripDrag"
+          @pointerleave="endFilmstripDrag"
+          @pointercancel="endFilmstripDrag"
+        >
+          <button
+            v-for="(asset, assetIndex) in assets"
+            :key="asset.id"
+            class="filmstrip-item"
+            :class="{ active: assetIndex === index }"
+            type="button"
+            :title="asset.filename"
+            :data-filmstrip-index="assetIndex"
+            @click="handleFilmstripItemClick(assetIndex, $event)"
+          >
+            <img :src="assetThumbnailUrl(asset, 'small')" :alt="asset.filename" loading="lazy" decoding="async" />
+          </button>
+        </div>
+        <input
+          v-if="filmstripScrollable"
+          class="filmstrip-scrollbar"
+          type="range"
+          min="0"
+          :max="filmstripScrollMax"
+          step="1"
+          :value="filmstripScrollLeft"
+          :aria-label="t('viewer.previewStripScroll')"
+          @input="handleFilmstripScrollbarInput"
+        />
+      </template>
     </div>
     <div class="viewer-progress" aria-hidden="true">
       <span :style="{ width: progressPercent }"></span>
@@ -417,6 +465,16 @@ const mediaError = ref('');
 const mediaRetry = ref(0);
 const downloading = ref(false);
 const slideshowPlaying = ref(false);
+const filmstripExpanded = ref(false);
+const filmstripScrollLeft = ref(0);
+const filmstripScrollMax = ref(0);
+const filmstripDragging = ref(false);
+const filmstripDragMoved = ref(false);
+const filmstripDragStartX = ref(0);
+const filmstripDragStartScrollLeft = ref(0);
+const filmstripPointerDownIndex = ref<number | null>(null);
+const filmstripSuppressClick = ref(false);
+const filmstripScrollable = computed(() => filmstripScrollMax.value > 0);
 const touchStartX = ref(0);
 const touchStartY = ref(0);
 const touchActive = ref(false);
@@ -483,6 +541,7 @@ watch(
     nextTick(() => {
       updateStageSize();
       scrollActiveThumbnailIntoView();
+      updateFilmstripScroll();
     });
   },
 );
@@ -504,6 +563,18 @@ watch(showInfo, () => {
 
 watch(zoom, () => {
   nextTick(centerStageScroll);
+});
+
+watch(filmstripExpanded, (expanded) => {
+  if (!expanded) {
+    filmstripScrollLeft.value = 0;
+    filmstripScrollMax.value = 0;
+    return;
+  }
+  nextTick(() => {
+    updateFilmstripScroll();
+    scrollActiveThumbnailIntoView();
+  });
 });
 
 watch(
@@ -530,15 +601,20 @@ onMounted(() => {
     }
   });
   window.addEventListener('keydown', handleKey);
-  window.addEventListener('resize', updateStageSize);
+  window.addEventListener('resize', handleWindowResize);
 });
 
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', handleKey);
-  window.removeEventListener('resize', updateStageSize);
+  window.removeEventListener('resize', handleWindowResize);
   stageResizeObserver?.disconnect();
   stopSlideshow();
 });
+
+function handleWindowResize() {
+  updateStageSize();
+  updateFilmstripScroll();
+}
 
 function handleTouchStart(event: TouchEvent) {
   touchActive.value = false;
@@ -600,6 +676,91 @@ function next() {
 
 function goTo(index: number) {
   emit('update:index', index);
+}
+
+function toggleFilmstrip() {
+  filmstripExpanded.value = !filmstripExpanded.value;
+}
+
+function handleFilmstripItemClick(index: number, event: MouseEvent) {
+  if (filmstripSuppressClick.value || filmstripDragMoved.value) {
+    event.preventDefault();
+    return;
+  }
+  goTo(index);
+}
+
+function handleFilmstripPointerDown(event: PointerEvent) {
+  if (event.button !== 0) return;
+  const container = filmstripRef.value;
+  if (!container) return;
+  filmstripDragging.value = true;
+  filmstripDragMoved.value = false;
+  filmstripPointerDownIndex.value = getFilmstripTargetIndex(event.target);
+  filmstripDragStartX.value = event.clientX;
+  filmstripDragStartScrollLeft.value = container.scrollLeft;
+  container.setPointerCapture(event.pointerId);
+}
+
+function handleFilmstripPointerMove(event: PointerEvent) {
+  if (!filmstripDragging.value) return;
+  const container = filmstripRef.value;
+  if (!container) return;
+  const deltaX = event.clientX - filmstripDragStartX.value;
+  if (Math.abs(deltaX) > 4) filmstripDragMoved.value = true;
+  container.scrollLeft = filmstripDragStartScrollLeft.value - deltaX;
+  updateFilmstripScroll();
+}
+
+function endFilmstripDrag(event: PointerEvent) {
+  const container = filmstripRef.value;
+  if (container?.hasPointerCapture(event.pointerId)) {
+    container.releasePointerCapture(event.pointerId);
+  }
+  const targetIndex = filmstripPointerDownIndex.value;
+  const shouldSelect = !filmstripDragMoved.value && targetIndex !== null;
+  filmstripDragging.value = false;
+  filmstripPointerDownIndex.value = null;
+  if (shouldSelect) {
+    filmstripSuppressClick.value = true;
+    goTo(targetIndex);
+    window.setTimeout(() => {
+      filmstripSuppressClick.value = false;
+    }, 0);
+  }
+  if (filmstripDragMoved.value) {
+    window.setTimeout(() => {
+      filmstripDragMoved.value = false;
+    }, 0);
+  }
+}
+
+function updateFilmstripScroll() {
+  const container = filmstripRef.value;
+  if (!container) {
+    filmstripScrollLeft.value = 0;
+    filmstripScrollMax.value = 0;
+    return;
+  }
+  filmstripScrollMax.value = Math.max(0, container.scrollWidth - container.clientWidth);
+  filmstripScrollLeft.value = Math.min(filmstripScrollMax.value, Math.max(0, container.scrollLeft));
+}
+
+function handleFilmstripScrollbarInput(event: Event) {
+  const target = event.target;
+  const container = filmstripRef.value;
+  if (!(target instanceof HTMLInputElement) || !container) return;
+  container.scrollLeft = Number(target.value);
+  updateFilmstripScroll();
+}
+
+function getFilmstripTargetIndex(target: EventTarget | null) {
+  if (!(target instanceof Element)) return null;
+  const item = target.closest<HTMLElement>('.filmstrip-item');
+  const rawIndex = item?.dataset.filmstripIndex;
+  if (rawIndex === undefined) return null;
+  const index = Number(rawIndex);
+  return Number.isInteger(index) && index >= 0 && index < props.assets.length ? index : null;
 }
 
 function toggleSlideshow() {

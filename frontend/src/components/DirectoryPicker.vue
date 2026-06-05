@@ -222,6 +222,7 @@ const showAdvanced = ref(false);
 const currentFolderCount = ref(0);
 const currentMediaCount = ref(0);
 const { t, formatCount } = useLocale();
+const unknownCount = -1;
 let previousBodyOverflow = '';
 let isBodyScrollLocked = false;
 
@@ -321,7 +322,7 @@ function rootIcon(root: FilesystemEntry) {
 
 function rootSummary(root: FilesystemEntry) {
   const counts = formatCounts(root.child_folder_count, mediaCount(root));
-  return `${groupLabel(root.group)} - ${counts}`;
+  return counts ? `${groupLabel(root.group)} - ${counts}` : groupLabel(root.group);
 }
 
 function entrySummary(entry: FilesystemEntry) {
@@ -330,6 +331,7 @@ function entrySummary(entry: FilesystemEntry) {
 }
 
 function formatCounts(folderCount: number, mediaCountValue: number) {
+  if (folderCount === unknownCount || mediaCountValue === unknownCount) return '';
   return `${formatCount(folderCount, 'folder')} / ${formatCount(mediaCountValue, 'media')}`;
 }
 

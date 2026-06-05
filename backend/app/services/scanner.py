@@ -505,11 +505,16 @@ def scan_library(
             if image_assets:
                 from app.services.thumbnails import bulk_generate_thumbnails
 
-                thumb_count = bulk_generate_thumbnails(
-                    session,
-                    [a.id for a in image_assets if a.id is not None],
-                    cancel_event=cancel_event,
-                )
+                thumb_count = 0
+                asset_ids = [a.id for a in image_assets if a.id is not None]
+                for size in ("small", "medium"):
+                    _check_cancelled(cancel_event)
+                    thumb_count += bulk_generate_thumbnails(
+                        session,
+                        asset_ids,
+                        size=size,
+                        cancel_event=cancel_event,
+                    )
                 if job:
                     job.message = f"Indexed {total} media items, {thumb_count} thumbnails generated"
                     session.add(job)

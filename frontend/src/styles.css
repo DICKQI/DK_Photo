@@ -22,9 +22,7 @@
 }
 
 body {
-  background:
-    radial-gradient(circle at 18% 0%, rgba(45, 108, 223, 0.08), transparent 34%),
-    #f5f7fb;
+  background: #f5f7fb;
 }
 
 button,
@@ -72,12 +70,15 @@ a:active {
   transform: translateY(-1px);
 }
 
-.app-shell,
-.admin-shell,
-.share-shell {
+.app-shell {
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.72), rgba(245, 247, 251, 0)),
     #f5f7fb;
+}
+
+.admin-shell,
+.share-shell {
+  background: #f5f7fb;
 }
 
 .brand-mark {
@@ -651,7 +652,6 @@ select:focus {
   display: grid;
   min-height: 100vh;
   grid-template-columns: 280px minmax(0, 1fr);
-  background: #f5f7fb;
 }
 
 .sidebar {
@@ -2198,9 +2198,13 @@ select:focus {
   inset: 0;
   display: grid;
   grid-template-columns: 72px 1fr 280px;
-  grid-template-rows: 72px 1fr 104px;
+  grid-template-rows: 72px 1fr 58px;
   background: #0d111a;
   color: #fff;
+}
+
+.viewer.filmstrip-expanded {
+  grid-template-rows: 72px 1fr 156px;
 }
 
 .viewer.info-collapsed {
@@ -2380,16 +2384,105 @@ select:focus {
 }
 
 .viewer-filmstrip {
-  display: flex;
-  grid-column: 1 / -1;
+  display: grid;
+  grid-column: 2;
   grid-row: 3;
-  gap: 10px;
-  align-items: center;
-  overflow-x: auto;
+  gap: 8px;
+  min-width: 0;
+  align-content: center;
   border-top: 1px solid rgba(255, 255, 255, 0.1);
   background: rgba(13, 17, 26, 0.82);
-  padding: 12px 18px;
+  padding: 8px 18px;
+}
+
+.viewer.info-collapsed .viewer-filmstrip {
+  grid-column: 2 / -1;
+}
+
+.viewer-filmstrip-summary {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
+
+.viewer-filmstrip-status {
+  color: #a9b3c7;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.filmstrip-toggle {
+  color: #cfe0ff;
+}
+
+.viewer-filmstrip-track {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  min-width: 0;
+  min-height: 78px;
+  align-items: center;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  padding: 3px;
+  cursor: grab;
   scroll-behavior: smooth;
+  scrollbar-width: none;
+  touch-action: pan-x;
+}
+
+.viewer-filmstrip-track.scrollable {
+  justify-content: flex-start;
+}
+
+.viewer-filmstrip-track::-webkit-scrollbar {
+  display: none;
+}
+
+.viewer-filmstrip-track.dragging {
+  cursor: grabbing;
+  scroll-behavior: auto;
+}
+
+.filmstrip-scrollbar {
+  width: 100%;
+  height: 18px;
+  margin: 0;
+  accent-color: #7aa7ff;
+  cursor: pointer;
+}
+
+.filmstrip-scrollbar::-webkit-slider-runnable-track {
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.filmstrip-scrollbar::-webkit-slider-thumb {
+  width: 34px;
+  height: 16px;
+  margin-top: -4px;
+  border: 1px solid rgba(255, 255, 255, 0.36);
+  border-radius: 999px;
+  background: #cfe0ff;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.32);
+  appearance: none;
+}
+
+.filmstrip-scrollbar::-moz-range-track {
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.filmstrip-scrollbar::-moz-range-thumb {
+  width: 34px;
+  height: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.36);
+  border-radius: 999px;
+  background: #cfe0ff;
 }
 
 .viewer-progress {
@@ -2412,9 +2505,11 @@ select:focus {
 
 .filmstrip-item {
   position: relative;
-  flex: 0 0 72px;
+  flex: 0 0 76px;
   width: 72px;
   height: 72px;
+  min-width: 72px;
+  min-height: 72px;
   overflow: hidden;
   border: 2px solid transparent;
   border-radius: 8px;
@@ -2662,7 +2757,6 @@ select:focus {
 .admin-shell,
 .share-shell {
   min-height: 100vh;
-  background: #f5f7fb;
 }
 
 .admin-shell {
@@ -4624,12 +4718,20 @@ select:focus {
 
   .viewer {
     grid-template-columns: 1fr;
-    grid-template-rows: auto minmax(220px, 1fr) 88px auto;
+    grid-template-rows: auto minmax(260px, 1fr) 58px auto;
+  }
+
+  .viewer.filmstrip-expanded {
+    grid-template-rows: auto minmax(220px, 1fr) 148px auto;
   }
 
   .viewer.info-collapsed {
     grid-template-columns: 1fr;
-    grid-template-rows: auto minmax(260px, 1fr) 88px;
+    grid-template-rows: auto minmax(260px, 1fr) 58px;
+  }
+
+  .viewer.info-collapsed.filmstrip-expanded {
+    grid-template-rows: auto minmax(220px, 1fr) 148px;
   }
 
   .viewer-bar {
@@ -4661,6 +4763,8 @@ select:focus {
     flex-basis: 62px;
     width: 62px;
     height: 62px;
+    min-width: 62px;
+    min-height: 62px;
   }
 
   .info-panel {
@@ -4993,13 +5097,19 @@ select:focus {
   --shadow-lg: 0 24px 90px rgba(0, 0, 0, 0.42);
 }
 
-:root[data-theme="dark"] body,
-:root[data-theme="dark"] .app-shell,
-:root[data-theme="dark"] .admin-shell,
-:root[data-theme="dark"] .share-shell {
+:root[data-theme="dark"] body {
+  background: #101624;
+}
+
+:root[data-theme="dark"] .app-shell {
   background:
     linear-gradient(180deg, rgba(122, 167, 255, 0.08), rgba(16, 22, 36, 0)),
     #101624;
+}
+
+:root[data-theme="dark"] .admin-shell,
+:root[data-theme="dark"] .share-shell {
+  background: #101624;
 }
 
 :root[data-theme="dark"] .sidebar-sticky-top,

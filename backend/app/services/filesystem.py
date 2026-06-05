@@ -2,11 +2,15 @@ from __future__ import annotations
 
 import os
 import platform
+import string
 from pathlib import Path
 
 from app.config import settings
 from app.schemas import FilesystemChildren, FilesystemEntry, FilesystemRoots
 from app.services.scanner import is_supported_image, is_supported_media
+
+
+COUNT_UNKNOWN = -1
 
 
 def current_platform() -> str:
@@ -27,16 +31,15 @@ def _entry(
         return None
     if not resolved.exists() or not resolved.is_dir():
         return None
-    child_folder_count, image_count, media_count = _directory_counts(resolved)
     return FilesystemEntry(
         name=name or resolved.name or str(resolved),
         path=str(resolved),
         is_root=is_root,
         kind=kind,
         group=group,
-        child_folder_count=child_folder_count,
-        image_count=image_count,
-        media_count=media_count,
+        child_folder_count=COUNT_UNKNOWN,
+        image_count=COUNT_UNKNOWN,
+        media_count=COUNT_UNKNOWN,
     )
 
 
@@ -75,16 +78,22 @@ def _directory_counts(path: Path) -> tuple[int, int, int]:
     return child_folder_count, image_count, media_count
 
 
-def _entry_with_counts(path: Path, *, name: str | None = None, is_accessible: bool = True, error: str | None = None) -> FilesystemEntry:
-    child_folder_count, image_count, media_count = (0, 0, 0) if not is_accessible else _directory_counts(path)
+def _entry_without_counts(
+    path: Path,
+    *,
+    name: str | None = None,
+    is_accessible: bool = True,
+    error: str | None = None,
+) -> FilesystemEntry:
+    count = COUNT_UNKNOWN if is_accessible else 0
     return FilesystemEntry(
         name=name or path.name or str(path),
         path=_display_path(path),
         is_accessible=is_accessible,
         error=error,
-        child_folder_count=child_folder_count,
-        image_count=image_count,
-        media_count=media_count,
+        child_folder_count=count,
+        image_count=count,
+        media_count=count,
     )
 
 
@@ -127,14 +136,38 @@ def _recommended_locations() -> list[FilesystemEntry]:
 def _system_roots() -> list[FilesystemEntry]:
     if os.name == "nt":
         roots: list[FilesystemEntry] = []
-        for letter in "ABCDEFGHIJKLMNOPQRSTUVWXYZ":
-            root = Path(f"{letter}:\\")
-            entry = _entry(root, f"{letter}:\\", kind="drive", group="Drives", is_root=True)
-            if entry:
-                roots.append(entry)
+        for letter in _windows_drive_letters():
+            roots.append(_windows_drive_entry(letter))
         return roots
     root_entry = _entry(Path("/"), "/", kind="drive", group="System", is_root=True)
     return [root_entry] if root_entry else []
+
+
+def _windows_drive_entry(letter: str) -> FilesystemEntry:
+    path = f"{letter}:\\"
+    return FilesystemEntry(
+        name=path,
+        path=path,
+        is_root=True,
+        kind="drive",
+        group="Drives",
+        child_folder_count=COUNT_UNKNOWN,
+        image_count=COUNT_UNKNOWN,
+        media_count=COUNT_UNKNOWN,
+    )
+
+
+def _windows_drive_letters() -> list[str]:
+    try:
+        import ctypes
+
+        bitmask = ctypes.windll.kernel32.GetLogicalDrives()
+    except Exception:
+        return list(string.ascii_uppercase)
+
+    if not bitmask:
+        return []
+    return [letter for index, letter in enumerate(string.ascii_uppercase) if bitmask & (1 << index)]
 
 
 def list_roots() -> FilesystemRoots:
@@ -174,7 +207,7 @@ def list_children(path: str) -> FilesystemChildren:
         try:
             is_dir = child.is_dir()
         except OSError as exc:
-            entries.append(_entry_with_counts(child, name=child.name, is_accessible=False, error=str(exc)))
+            entries.append(_entry_without_counts(child, name=child.name, is_accessible=False, error=str(exc)))
             continue
         if is_dir:
             current_child_folder_count += 1
@@ -186,10 +219,9 @@ def list_children(path: str) -> FilesystemChildren:
         else:
             continue
         try:
-            child.iterdir()
-            entries.append(_entry_with_counts(child, name=child.name))
+            entries.append(_entry_without_counts(child, name=child.name))
         except OSError as exc:
-            entries.append(_entry_with_counts(child, name=child.name, is_accessible=False, error=str(exc)))
+            entries.append(_entry_without_counts(child, name=child.name, is_accessible=False, error=str(exc)))
 
     return FilesystemChildren(
         platform=current_platform(),

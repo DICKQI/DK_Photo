@@ -285,7 +285,7 @@ def get_public_thumbnail(
     if not asset or not _share_contains_asset(session, share, asset):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found in share")
     thumbnail = ensure_thumbnail(session, asset, size)
-    return FileResponse(thumbnail, media_type="image/webp")
+    return FileResponse(thumbnail, media_type="image/webp", headers={"Cache-Control": "private, max-age=31536000, immutable"})
 
 
 def _share_contains_asset(session: SessionDep, share: ShareLink, asset: Asset) -> bool:

@@ -296,6 +296,16 @@
               </div>
               <div class="row-actions">
                 <small class="status-pill" :class="jobStatusClass(job.status)">{{ jobStatusLabel(job.status) }}</small>
+                <button
+                  v-if="job.status === 'running' || job.status === 'queued'"
+                  class="icon-button danger"
+                  :title="t('admin.cancelScan')"
+                  :disabled="isBusy(cancelJobKey(job.id))"
+                  @click="cancelScan(job.id)"
+                >
+                  <LoaderCircle v-if="isBusy(cancelJobKey(job.id))" class="spin" :size="16" />
+                  <Ban v-else :size="16" />
+                </button>
                 <small>{{ formatCount(job.total_assets, 'media') }}</small>
                 <small class="muted">{{ jobTimeLabel(job) }}</small>
               </div>
@@ -572,8 +582,9 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue';
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 import {
+  Ban,
   CircleAlert,
   CircleCheck,
   Copy,
@@ -691,6 +702,41 @@ const userResultSummary = computed(() => {
 });
 
 onMounted(refreshAll);
+
+const POLL_INTERVAL = 3000;
+let pollTimer: ReturnType<typeof setInterval> | null = null;
+
+function startJobPolling() {
+  if (pollTimer) return;
+  pollTimer = setInterval(async () => {
+    try {
+      jobs.value = await api.jobs();
+    } catch {
+      stopJobPolling();
+    }
+  }, POLL_INTERVAL);
+}
+
+function stopJobPolling() {
+  if (pollTimer) {
+    clearInterval(pollTimer);
+    pollTimer = null;
+  }
+}
+
+watch(
+  () => runningJobCount.value,
+  (count) => {
+    if (count > 0) {
+      startJobPolling();
+    } else {
+      stopJobPolling();
+    }
+  },
+  { immediate: true },
+);
+
+onUnmounted(stopJobPolling);
 
 async function refreshAll() {
   startBusy(refreshKey);
@@ -815,6 +861,19 @@ async function scan(libraryId: number) {
     await reloadAfterMutation(t('admin.scanQueued'));
   } catch (err) {
     showMessage(errorMessage(err, t('admin.unableQueueScan')), 'error');
+  } finally {
+    stopBusy(key);
+  }
+}
+
+async function cancelScan(jobId: number) {
+  const key = cancelJobKey(jobId);
+  startBusy(key);
+  try {
+    await api.cancelScanJob(jobId);
+    await reloadAfterMutation(t('admin.scanCancelled'));
+  } catch (err) {
+    showMessage(errorMessage(err, t('admin.unableCancelScan')), 'error');
   } finally {
     stopBusy(key);
   }
@@ -1042,6 +1101,10 @@ function stopBusy(key: string) {
 
 function scanKey(id: number) {
   return `library:scan:${id}`;
+}
+
+function cancelJobKey(id: number) {
+  return `job:cancel:${id}`;
 }
 
 function librarySaveKey(id: number) {

@@ -291,7 +291,7 @@ def test_scan_job_preserves_thumbnail_generation_message(tmp_path: Path) -> None
             assert updated is not None
             assert updated.status == "completed"
             assert updated.total_assets == 1
-            assert updated.message == "Indexed 1 media items, 1 thumbnails generated"
+            assert updated.message == "Indexed 1 media items, 2 thumbnails generated"
     finally:
         object.__setattr__(settings, "data_dir", old_data_dir)
 

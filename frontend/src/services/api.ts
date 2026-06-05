@@ -88,6 +88,9 @@ export const api = {
   scanLibrary(libraryId: number) {
     return request<ScanJob>(`/api/admin/libraries/${libraryId}/scan`, { method: 'POST' });
   },
+  cancelScanJob(jobId: number) {
+    return request<{ ok: boolean }>(`/api/admin/jobs/${jobId}/cancel`, { method: 'POST' });
+  },
   jobs() {
     return request<ScanJob[]>('/api/admin/jobs');
   },

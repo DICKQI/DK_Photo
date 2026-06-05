@@ -1088,7 +1088,7 @@
           <template v-if="selectionMode">
             <button class="photo-select-overlay" @click="toggleAssetSelection(asset.id, index, $event)">
               <span class="photo-thumb" :class="{ portrait: isPortraitAsset(asset) }">
-                <img :src="thumbnailUrl(asset.id, thumbSize)" :alt="asset.filename" loading="lazy" />
+                <img :src="thumbnailUrl(asset.id, thumbSize)" :alt="asset.filename" loading="lazy" decoding="async" />
                 <span v-if="isVideoAsset(asset)" class="photo-media-badge" :title="t('album.videoAsset')">
                   <Play :size="14" fill="currentColor" />
                 </span>
@@ -1114,7 +1114,7 @@
           <template v-else>
             <button class="photo-open" @click="openViewer(index)">
               <span class="photo-thumb" :class="{ portrait: isPortraitAsset(asset) }">
-                <img :src="thumbnailUrl(asset.id, thumbSize)" :alt="asset.filename" loading="lazy" />
+                <img :src="thumbnailUrl(asset.id, thumbSize)" :alt="asset.filename" loading="lazy" decoding="async" />
                 <span v-if="isVideoAsset(asset)" class="photo-media-badge" :title="t('album.videoAsset')">
                   <Play :size="14" fill="currentColor" />
                 </span>
@@ -3132,6 +3132,8 @@ async function openAllPhotosView() {
   currentLens.value = null;
   favoriteFilter.value = false;
   includeSubfolders.value = false;
+  mediaFilter.value = 'all';
+  ratingFilter.value = 0;
   favoritesView.value = false;
   recentView.value = false;
   videosView.value = false;
@@ -3168,6 +3170,8 @@ async function openRecentView() {
   currentLens.value = null;
   favoriteFilter.value = false;
   includeSubfolders.value = false;
+  mediaFilter.value = 'all';
+  ratingFilter.value = 0;
   favoritesView.value = false;
   allPhotosView.value = false;
   videosView.value = false;
@@ -3209,7 +3213,6 @@ async function openVideosView() {
   recentView.value = false;
   placesView.value = false;
   albumOverviewView.value = false;
-  mediaFilter.value = 'video';
   videosView.value = true;
   try {
     await loadAssets();
@@ -3277,6 +3280,8 @@ async function openFavoritesView() {
   currentLens.value = null;
   favoriteFilter.value = false;
   includeSubfolders.value = false;
+  mediaFilter.value = 'all';
+  ratingFilter.value = 0;
   allPhotosView.value = false;
   recentView.value = false;
   videosView.value = false;
