@@ -17,6 +17,10 @@
           <RefreshCw v-else :size="18" />
           {{ isBusy(refreshKey) ? t('common.refreshing') : t('common.refresh') }}
         </button>
+        <a class="secondary-button" href="https://github.com/DICKQI/DK_Photo" target="_blank" rel="noopener noreferrer">
+          <ExternalLink :size="18" />
+          GitHub
+        </a>
         <RouterLink class="secondary-button" to="/">
           <Images :size="18" />
           {{ t('common.backToPhotos') }}
@@ -665,6 +669,7 @@ import {
   CircleAlert,
   CircleCheck,
   Copy,
+  ExternalLink,
   Eye,
   FolderSearch,
   FolderOpen,
