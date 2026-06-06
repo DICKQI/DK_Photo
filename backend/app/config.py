@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -53,24 +54,47 @@ class Settings:
     def thumbnail_dir(self) -> Path:
         return self.data_dir / "thumbnails"
 
+    @property
+    def persisted_settings_path(self) -> Path:
+        return self.data_dir / "persisted_settings.json"
+
 
 settings = Settings()
 
-_runtime_thumb_workers: int | None = None
+
+def _load_persisted() -> dict:
+    path = settings.persisted_settings_path
+    if path.exists():
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            return {}
+    return {}
+
+
+def _save_persisted(data: dict) -> None:
+    path = settings.persisted_settings_path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
 
 def get_thumb_workers() -> int:
-    global _runtime_thumb_workers
-    if _runtime_thumb_workers is not None:
-        return _runtime_thumb_workers
+    persisted = _load_persisted()
+    value = persisted.get("thumb_workers")
+    if value is not None:
+        return int(value)
     return settings.thumb_workers
 
 
 def set_thumb_workers(count: int) -> None:
-    global _runtime_thumb_workers
-    _runtime_thumb_workers = max(1, count)
+    count = max(1, count)
+    persisted = _load_persisted()
+    persisted["thumb_workers"] = count
+    _save_persisted(persisted)
 
 
 def reset_thumb_workers() -> None:
-    global _runtime_thumb_workers
-    _runtime_thumb_workers = None
+    persisted = _load_persisted()
+    if "thumb_workers" in persisted:
+        del persisted["thumb_workers"]
+        _save_persisted(persisted)
