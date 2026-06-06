@@ -68,7 +68,7 @@ def filesystem_children(path: str, _: AdminUser) -> FilesystemChildren:
 
 
 @router.post("/libraries", response_model=LibraryRead)
-def create_library(payload: LibraryCreate, request: Request, session: SessionDep, _: AdminUser) -> LibraryRoot:
+def create_library(payload: LibraryCreate, session: SessionDep, _: AdminUser) -> LibraryRoot:
     path = resolve_library_path(payload.path)
     existing = session.exec(select(LibraryRoot).where(LibraryRoot.path == str(path))).first()
     if existing:
@@ -77,9 +77,6 @@ def create_library(payload: LibraryCreate, request: Request, session: SessionDep
     session.add(library)
     session.commit()
     session.refresh(library)
-    watcher = getattr(request.app.state, "library_watcher", None)
-    if watcher:
-        watcher.refresh()
     return library
 
 

@@ -31,7 +31,7 @@ class Settings:
     default_library_path: str = os.getenv("DK_PHOTO_DEFAULT_LIBRARY_PATH", "")
     default_library_name: str = os.getenv("DK_PHOTO_DEFAULT_LIBRARY_NAME", "Family Photos")
     cors_origins: list[str] = None  # type: ignore[assignment]
-    watch_enabled: bool = _env_bool("DK_PHOTO_WATCH_ENABLED", True)
+    watch_enabled: bool = _env_bool("DK_PHOTO_WATCH_ENABLED", False)
 
     def __post_init__(self) -> None:
         object.__setattr__(
