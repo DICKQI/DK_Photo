@@ -3019,6 +3019,16 @@ select:focus {
   background: #fff7f8;
 }
 
+.table-row.running-row {
+  border-color: var(--brand);
+  animation: scan-pulse 2s ease-in-out infinite;
+}
+
+@keyframes scan-pulse {
+  0%, 100% { border-color: var(--brand); opacity: 0.6; }
+  50% { border-color: var(--brand); opacity: 1; }
+}
+
 .row-title {
   display: grid;
   grid-template-columns: 38px minmax(0, 1fr);
@@ -5163,6 +5173,10 @@ select:focus {
 :root[data-theme="dark"] .table-row.failed-row {
   border-color: rgba(248, 113, 113, 0.28);
   background: rgba(127, 29, 29, 0.22);
+}
+
+:root[data-theme="dark"] .table-row.running-row {
+  opacity: 0.9;
 }
 
 :root[data-theme="dark"] .login-helper {

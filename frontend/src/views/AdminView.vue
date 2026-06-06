@@ -281,7 +281,7 @@
             <span>{{ t('admin.noMatchingScanJobsHint') }}</span>
           </div>
           <div v-else class="table-list scrollable">
-            <div v-for="job in filteredJobs" :key="job.id" class="table-row" :class="{ 'failed-row': job.status === 'failed' }">
+            <div v-for="job in filteredJobs" :key="job.id" class="table-row" :class="{ 'failed-row': job.status === 'failed', 'running-row': job.status === 'running' || job.status === 'queued' }">
               <div class="row-title">
                 <span class="row-icon" :class="jobStatusClass(job.status)">
                   <LoaderCircle v-if="job.status === 'running' || job.status === 'queued'" class="spin" :size="20" />
@@ -306,7 +306,11 @@
                   <LoaderCircle v-if="isBusy(cancelJobKey(job.id))" class="spin" :size="16" />
                   <Ban v-else :size="16" />
                 </button>
-                <small>{{ formatCount(job.total_assets, 'media') }}</small>
+                <small v-if="job.status === 'running' || job.status === 'queued'">
+                  <LoaderCircle class="spin" :size="12" />
+                  {{ t('admin.scanningProgress', { count: job.processed_assets.toLocaleString() }) }}
+                </small>
+                <small v-else>{{ formatCount(job.total_assets, 'media') }}</small>
                 <small class="muted">{{ jobTimeLabel(job) }}</small>
               </div>
             </div>
