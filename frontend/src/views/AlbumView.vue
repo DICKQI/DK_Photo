@@ -2352,7 +2352,7 @@ const placeOverviewActive = computed(() => placesView.value && !currentPlace.val
 const placeClusters = computed(() => assetPlaces.value.map(placeFromApi));
 const displayedPlaceClusters = computed(() => sortPlaceClusters(placeClusters.value));
 const displayAssets = computed(() => {
-  const source = placeOverviewActive.value ? [] : assets.value;
+  const source = placeOverviewActive.value || !assetListViewActive() ? [] : assets.value;
   const sorted = [...source];
   if (sortMode.value === 'name') {
     return sorted.sort((a, b) => compareByDirection(a.filename.localeCompare(b.filename)));
@@ -2421,21 +2421,7 @@ const visibleMediaCount = computed(() =>
 );
 const albumOverviewMediaCount = computed(() => filteredPhotoAlbums.value.reduce((count, album) => count + album.asset_count, 0));
 const hasVisibleContent = computed(() => (placeOverviewActive.value ? displayedPlaceClusters.value.length > 0 : displayAssets.value.length > 0));
-const pagedAssetsViewActive = computed(() =>
-  Boolean(
-    currentFolder.value ||
-      favoritesView.value ||
-      allPhotosView.value ||
-      recentView.value ||
-      videosView.value ||
-      currentPlace.value ||
-      currentTag.value ||
-      currentRating.value ||
-      currentCamera.value ||
-      currentLens.value ||
-      globalSearchActive.value,
-  ),
-);
+const pagedAssetsViewActive = computed(() => assetListViewActive() && !currentAlbum.value);
 const canLoadMoreAssets = computed(() =>
   pagedAssetsViewActive.value &&
   assets.value.length >= assetsPageSize &&
@@ -2654,6 +2640,23 @@ const viewerShortcutsDisabled = computed(() =>
       renameFolder.value,
   ),
 );
+
+function assetListViewActive() {
+  return Boolean(
+    currentFolder.value ||
+      favoritesView.value ||
+      allPhotosView.value ||
+      recentView.value ||
+      videosView.value ||
+      currentPlace.value ||
+      currentTag.value ||
+      currentRating.value ||
+      currentCamera.value ||
+      currentLens.value ||
+      currentAlbum.value ||
+      globalSearchActive.value,
+  );
+}
 
 watch(createAlbumName, (value) => {
   if (value.trim()) selectedTargetAlbumId.value = null;
@@ -2877,6 +2880,7 @@ function goRoot() {
   selectionMode.value = false;
   selectedAssetIds.value = new Set();
   lastSelectedAssetIndex.value = null;
+  assets.value = [];
   loadRoot();
 }
 
