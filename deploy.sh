@@ -984,31 +984,40 @@ show_main_menu() {
     while true; do
         echo ""
         echo "DK Photo 部署脚本"
-        echo "1) 初始化/更新部署"
-        echo "2) 管理照片目录挂载"
-        echo "3) 查看当前配置"
+        echo "1) 全量部署（重建全部服务）"
+        echo "2) 仅更新前端"
+        echo "3) 仅更新后端"
+        echo "4) 管理照片目录挂载"
+        echo "5) 查看当前配置"
         echo "0) 退出"
-        read -r -p "请选择 [1-3,0]: " choice
+        read -r -p "请选择 [1-5,0]: " choice
 
         case "$choice" in
             1) run_deploy; return ;;
-            2) manage_photo_mounts ;;
-            3) show_current_config ;;
+            2) run_deploy frontend; return ;;
+            3) run_deploy backend; return ;;
+            4) manage_photo_mounts ;;
+            5) show_current_config ;;
             0) exit 0 ;;
-            *) log_warn "请输入 0-3。" ;;
+            *) log_warn "请输入 0-5。" ;;
         esac
     done
 }
 
 show_usage() {
     printf '%s\n' \
-        "Usage: bash deploy.sh [command]" \
+        "Usage: bash deploy.sh [command] [options]" \
         "" \
         "Commands:" \
-        "  deploy    初始化/更新部署" \
-        "  photos    管理照片目录挂载" \
-        "  config    查看当前配置" \
-        "  help      显示帮助" \
+        "  deploy [service]  初始化/更新部署（可选指定 frontend 或 backend）" \
+        "  photos            管理照片目录挂载" \
+        "  config            查看当前配置" \
+        "  help              显示帮助" \
+        "" \
+        "Examples:" \
+        "  bash deploy.sh deploy            # 全量部署" \
+        "  bash deploy.sh deploy frontend   # 仅更新前端" \
+        "  bash deploy.sh deploy backend    # 仅更新后端" \
         "" \
         "不带 command 运行时会显示交互菜单。"
 }
@@ -1018,6 +1027,13 @@ ENV_CREATED=0
 DB_EXISTS=0
 GENERATED_ADMIN_PASSWORD=""
 GENERATED_SECRET_KEY=0
+
+local target_service="${1:-}"
+
+if [ -n "$target_service" ] && [ "$target_service" != "frontend" ] && [ "$target_service" != "backend" ]; then
+    log_error "Unknown service: $target_service. Valid: frontend, backend"
+    exit 1
+fi
 
 # -----------------------------------------------------------
 # 1. 检查前置依赖 (Check prerequisites)
@@ -1105,6 +1121,15 @@ else
         log_error "照片目录检查未通过，已取消部署。请修复路径或删除无效挂载后重试。"
         exit 1
     fi
+fi
+
+if [ -n "$target_service" ]; then
+    log_step "选择性部署: ${target_service}"
+    compose_cmd up -d --build "$target_service"
+    log_info "${target_service} 已更新并重启。"
+    echo ""
+    compose_cmd ps
+    return
 fi
 
 # -----------------------------------------------------------
@@ -1228,7 +1253,7 @@ main() {
             show_main_menu
             ;;
         deploy|init|up)
-            run_deploy
+            run_deploy "${2:-}"
             ;;
         photos|mounts)
             manage_photo_mounts
