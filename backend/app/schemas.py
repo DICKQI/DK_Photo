@@ -297,3 +297,11 @@ class PublicShareRead(BaseModel):
 
 class ShareVerifyRequest(BaseModel):
     password: str
+
+
+class ThumbnailStats(BaseModel):
+    total_count: int = 0
+    total_size_bytes: int = 0
+    small_count: int = 0
+    medium_count: int = 0
+    large_count: int = 0

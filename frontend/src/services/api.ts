@@ -15,6 +15,7 @@ import type {
   PublicShare,
   ScanJob,
   ShareLink,
+  ThumbnailStats,
   User,
 } from '../types';
 
@@ -93,6 +94,9 @@ export const api = {
   },
   jobs() {
     return request<ScanJob[]>('/api/admin/jobs');
+  },
+  thumbnailStats() {
+    return request<ThumbnailStats>('/api/admin/thumbnail-stats');
   },
   users() {
     return request<User[]>('/api/admin/users');

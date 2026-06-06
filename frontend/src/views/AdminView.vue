@@ -45,6 +45,11 @@
         <span>{{ t('admin.summaryOpenShares') }}</span>
         <strong>{{ activeShareCount }}</strong>
       </article>
+      <article class="summary-tile">
+        <HardDrive :size="20" />
+        <span>{{ t('admin.thumbnailStorage') }}</span>
+        <strong>{{ formatBytes(thumbnailStats.total_size_bytes) }}</strong>
+      </article>
     </section>
 
     <section class="admin-grid" :class="{ working: isWorking }">
@@ -595,6 +600,7 @@ import {
   FolderSearch,
   FolderOpen,
   GalleryHorizontal,
+  HardDrive,
   Images,
   KeyRound,
   LoaderCircle,
@@ -618,7 +624,7 @@ import LanguageToggle from '../components/LanguageToggle.vue';
 import { useLocale } from '../composables/useLocale';
 import { useTheme } from '../composables/useTheme';
 import { api } from '../services/api';
-import type { Library, LibraryPermission, ScanJob, ShareLink, User } from '../types';
+import type { Library, LibraryPermission, ScanJob, ShareLink, ThumbnailStats, User } from '../types';
 
 const libraries = ref<Library[]>([]);
 const { isDark, toggleTheme } = useTheme();
@@ -626,6 +632,7 @@ const { t, formatCount, formatDate, formatDateTime } = useLocale();
 const jobs = ref<ScanJob[]>([]);
 const users = ref<User[]>([]);
 const shares = ref<ShareLink[]>([]);
+const thumbnailStats = ref<ThumbnailStats>({ total_count: 0, total_size_bytes: 0, small_count: 0, medium_count: 0, large_count: 0 });
 const libraryName = ref('Family Photos');
 const libraryPath = ref('');
 const message = ref('');
@@ -758,6 +765,7 @@ async function loadAdminData() {
   jobs.value = await api.jobs();
   users.value = await api.users();
   shares.value = await api.adminShares();
+  thumbnailStats.value = await api.thumbnailStats();
   syncLibraryEditBuffer();
   syncEditBuffer();
 }
@@ -1315,6 +1323,14 @@ async function confirmDeleteShare() {
 
 function roleLabel(role: User['role']) {
   return role === 'admin' ? t('common.admin') : t('common.member');
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes === 0) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const i = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+  const value = bytes / 1024 ** i;
+  return `${value.toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
 }
 
 function jobStatusLabel(status: string) {

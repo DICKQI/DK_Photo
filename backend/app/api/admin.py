@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, status
-from sqlalchemy import or_
+from sqlalchemy import func, or_
 from sqlmodel import Session, select
 
 from app.config import settings
@@ -38,6 +38,7 @@ from app.schemas import (
     ScanJobRead,
     ShareRead,
     ShareUpdate,
+    ThumbnailStats,
     UserCreate,
     UserRead,
     UserUpdate,
@@ -564,3 +565,28 @@ def cleanup_thumbnails(session: SessionDep, _: AdminUser) -> dict:
             pass
 
     return {"deleted_files": deleted_files, "freed_bytes": freed_bytes, "deleted_dirs": deleted_dirs}
+
+
+@router.get("/thumbnail-stats", response_model=ThumbnailStats)
+def get_thumbnail_stats(session: SessionDep, _: AdminUser) -> ThumbnailStats:
+    counts = session.exec(
+        select(Thumbnail.size, func.count(Thumbnail.id)).group_by(Thumbnail.size)  # type: ignore[attr-defined]
+    ).all()
+    count_map = {size: cnt for size, cnt in counts}
+
+    total_size_bytes = 0
+    thumbnail_root = settings.thumbnail_dir
+    if thumbnail_root.exists():
+        for path in thumbnail_root.rglob("*.webp"):
+            try:
+                total_size_bytes += path.stat().st_size
+            except OSError:
+                pass
+
+    return ThumbnailStats(
+        total_count=sum(count_map.values()),
+        total_size_bytes=total_size_bytes,
+        small_count=count_map.get("small", 0),
+        medium_count=count_map.get("medium", 0),
+        large_count=count_map.get("large", 0),
+    )

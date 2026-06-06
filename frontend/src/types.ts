@@ -117,6 +117,14 @@ export interface ScanJob {
   finished_at: string | null;
 }
 
+export interface ThumbnailStats {
+  total_count: number;
+  total_size_bytes: number;
+  small_count: number;
+  medium_count: number;
+  large_count: number;
+}
+
 export interface ShareLink {
   id: number;
   token: string;
