@@ -72,10 +72,10 @@ export const api = {
   libraries() {
     return request<Library[]>('/api/admin/libraries');
   },
-  createLibrary(name: string, path: string) {
+  createLibrary(name: string, path: string, watchEnabled: boolean = false) {
     return request<Library>('/api/admin/libraries', {
       method: 'POST',
-      body: JSON.stringify({ name, path }),
+      body: JSON.stringify({ name, path, watch_enabled: watchEnabled }),
     });
   },
   updateLibrary(libraryId: number, payload: LibraryUpdate) {

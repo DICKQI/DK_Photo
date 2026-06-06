@@ -38,6 +38,7 @@ class LibraryRoot(SQLModel, table=True):
     name: str
     path: str = Field(index=True, unique=True)
     is_enabled: bool = Field(default=True, index=True)
+    watch_enabled: bool = Field(default=False)
     created_at: datetime = Field(default_factory=utc_now)
     last_scan_at: Optional[datetime] = None
     deleted_at: Optional[datetime] = Field(default=None, index=True)

@@ -3046,6 +3046,28 @@ select:focus {
   gap: 10px;
 }
 
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.88rem;
+  color: var(--muted);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.checkbox-label input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+
+.secondary-button.active-toggle {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
 .path-input-wrap {
   display: grid;
   grid-template-columns: 1fr 40px;

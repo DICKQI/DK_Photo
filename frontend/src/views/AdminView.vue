@@ -72,6 +72,10 @@
               <FolderSearch :size="17" />
             </button>
           </div>
+          <label class="checkbox-label">
+            <input v-model="libraryWatchEnabled" type="checkbox" />
+            <span>{{ t('admin.enableWatch') }}</span>
+          </label>
           <button class="primary-button" type="submit" :disabled="isBusy(createLibraryKey)">
             <LoaderCircle v-if="isBusy(createLibraryKey)" class="spin" :size="17" />
             <Plus v-else :size="17" />
@@ -134,6 +138,11 @@
                 <button v-else class="secondary-button" :title="t('admin.editLibraryName')" @click="editLibrary(library)">
                   <Pencil :size="17" />
                   {{ t('common.edit') }}
+                </button>
+                <button class="secondary-button" :class="{ 'active-toggle': library.watch_enabled }" :title="library.watch_enabled ? t('admin.disableWatch') : t('admin.enableWatch')" :disabled="isBusy(librarySaveKey(library.id))" @click="toggleWatchEnabled(library)">
+                  <LoaderCircle v-if="isBusy(librarySaveKey(library.id))" class="spin" :size="17" />
+                  <Eye v-else :size="17" />
+                  {{ library.watch_enabled ? t('admin.watchOn') : t('admin.watchOff') }}
                 </button>
                 <button class="primary-button" :disabled="isBusy(scanKey(library.id))" @click="scan(library.id)">
                   <LoaderCircle v-if="isBusy(scanKey(library.id))" class="spin" :size="17" />
@@ -662,6 +671,7 @@ import {
   CircleAlert,
   CircleCheck,
   Copy,
+  Eye,
   FolderSearch,
   FolderOpen,
   GalleryHorizontal,
@@ -704,6 +714,7 @@ const settingsLoading = ref(false);
 const settingsEditBuffer = reactive({ thumb_workers: 0 });
 const libraryName = ref('Family Photos');
 const libraryPath = ref('');
+const libraryWatchEnabled = ref(false);
 const message = ref('');
 const messageKind = ref<'success' | 'error'>('success');
 const librarySearch = ref('');
@@ -871,7 +882,7 @@ function selectDirectory(path: string) {
 async function createLibrary() {
   startBusy(createLibraryKey);
   try {
-    await api.createLibrary(libraryName.value, libraryPath.value);
+    await api.createLibrary(libraryName.value, libraryPath.value, libraryWatchEnabled.value);
     await reloadAfterMutation(t('admin.libraryCreated'));
   } catch (err) {
     showMessage(errorMessage(err, t('admin.unableCreateLibrary')), 'error');
@@ -906,6 +917,19 @@ async function saveLibraryName(library: Library) {
     await api.updateLibrary(library.id, { name });
     editingLibraryId.value = null;
     await reloadAfterMutation(t('admin.libraryUpdated'));
+  } catch (err) {
+    showMessage(errorMessage(err, t('admin.unableUpdateLibrary')), 'error');
+  } finally {
+    stopBusy(key);
+  }
+}
+
+async function toggleWatchEnabled(library: Library) {
+  const key = librarySaveKey(library.id);
+  startBusy(key);
+  try {
+    await api.updateLibrary(library.id, { watch_enabled: !library.watch_enabled });
+    await reloadAfterMutation(library.watch_enabled ? t('admin.watchDisabled') : t('admin.watchEnabled'));
   } catch (err) {
     showMessage(errorMessage(err, t('admin.unableUpdateLibrary')), 'error');
   } finally {

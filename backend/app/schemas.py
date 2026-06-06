@@ -22,10 +22,12 @@ class LoginRequest(BaseModel):
 class LibraryCreate(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     path: str = Field(min_length=1)
+    watch_enabled: bool = False
 
 
 class LibraryUpdate(BaseModel):
     name: Optional[str] = Field(default=None, min_length=1, max_length=120)
+    watch_enabled: Optional[bool] = None
 
 
 class LibraryRead(BaseModel):
@@ -33,6 +35,7 @@ class LibraryRead(BaseModel):
     name: str
     path: str
     is_enabled: bool
+    watch_enabled: bool
     created_at: datetime
     last_scan_at: Optional[datetime]
     deleted_at: Optional[datetime] = None

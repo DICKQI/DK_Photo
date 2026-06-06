@@ -11,6 +11,7 @@ export interface Library {
   name: string;
   path: string;
   is_enabled: boolean;
+  watch_enabled: boolean;
   created_at: string;
   last_scan_at: string | null;
   deleted_at: string | null;
@@ -18,6 +19,7 @@ export interface Library {
 
 export interface LibraryUpdate {
   name?: string;
+  watch_enabled?: boolean;
 }
 
 export interface Folder {

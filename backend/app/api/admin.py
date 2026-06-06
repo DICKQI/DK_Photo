@@ -71,25 +71,29 @@ def filesystem_children(path: str, _: AdminUser) -> FilesystemChildren:
 
 
 @router.post("/libraries", response_model=LibraryRead)
-def create_library(payload: LibraryCreate, session: SessionDep, _: AdminUser) -> LibraryRoot:
+def create_library(payload: LibraryCreate, request: Request, session: SessionDep, _: AdminUser) -> LibraryRoot:
     path = resolve_library_path(payload.path)
     existing = session.exec(select(LibraryRoot).where(LibraryRoot.path == str(path))).first()
     if existing:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Library already exists")
-    library = LibraryRoot(name=payload.name, path=str(path), is_enabled=True)
+    library = LibraryRoot(name=payload.name, path=str(path), is_enabled=True, watch_enabled=payload.watch_enabled)
     session.add(library)
     session.commit()
     session.refresh(library)
+    watcher = getattr(request.app.state, "library_watcher", None)
+    if watcher:
+        watcher.refresh()
     return library
 
 
 @router.patch("/libraries/{library_id}", response_model=LibraryRead)
-def update_library(library_id: int, payload: LibraryUpdate, session: SessionDep, _: AdminUser) -> LibraryRoot:
+def update_library(library_id: int, payload: LibraryUpdate, request: Request, session: SessionDep, _: AdminUser) -> LibraryRoot:
     library = session.get(LibraryRoot, library_id)
     if not library:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Library not found")
     if library.deleted_at:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Library is being deleted")
+    watch_changed = False
     if payload.name is not None:
         name = payload.name.strip()
         if not name:
@@ -100,8 +104,15 @@ def update_library(library_id: int, payload: LibraryUpdate, session: SessionDep,
         ).first()
         if root_folder:
             root_folder.name = name
+    if payload.watch_enabled is not None and payload.watch_enabled != library.watch_enabled:
+        library.watch_enabled = payload.watch_enabled
+        watch_changed = True
     session.commit()
     session.refresh(library)
+    if watch_changed:
+        watcher = getattr(request.app.state, "library_watcher", None)
+        if watcher:
+            watcher.refresh()
     return library
 
 

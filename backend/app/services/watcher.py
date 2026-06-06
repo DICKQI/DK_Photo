@@ -55,7 +55,12 @@ class LibraryWatcher:
             return
         self.observer.unschedule_all()
         with Session(engine) as session:
-            libraries = session.exec(select(LibraryRoot).where(LibraryRoot.is_enabled == True)).all()  # noqa: E712
+            libraries = session.exec(
+                select(LibraryRoot).where(
+                    LibraryRoot.is_enabled == True,  # noqa: E712
+                    LibraryRoot.watch_enabled == True,  # noqa: E712
+                )
+            ).all()
             for library in libraries:
                 path = Path(library.path)
                 if is_docker_photos_root(library.path):

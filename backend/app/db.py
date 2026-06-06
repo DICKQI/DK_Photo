@@ -96,6 +96,9 @@ def run_lightweight_migrations() -> None:
     if "deleted_at" not in library_columns:
         with engine.begin() as connection:
             connection.execute(text("ALTER TABLE libraryroot ADD COLUMN deleted_at DATETIME"))
+    if "watch_enabled" not in library_columns:
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE libraryroot ADD COLUMN watch_enabled BOOLEAN NOT NULL DEFAULT 0"))
 
 
 def get_session() -> Generator[Session, None, None]:
