@@ -86,4 +86,4 @@ class LibraryWatcher:
             session.add(job)
             session.commit()
             session.refresh(job)
-            run_scan_job(session, job.id or 0)
+            run_scan_job(session, job.id or 0, generate_thumbnails=True)

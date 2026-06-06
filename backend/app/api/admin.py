@@ -7,7 +7,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, status
 from sqlalchemy import func, or_
 from sqlmodel import Session, select
 
-from app.config import settings
+from app.config import get_thumb_workers, reset_thumb_workers, set_thumb_workers, settings
 from app.deps import AdminUser, SessionDep
 from app.models import (
     Asset,
@@ -36,6 +36,8 @@ from app.schemas import (
     LibraryUpdate,
     PasswordReset,
     ScanJobRead,
+    ServerSettingsRead,
+    ServerSettingsUpdate,
     ShareRead,
     ShareUpdate,
     ThumbnailStats,
@@ -86,6 +88,8 @@ def update_library(library_id: int, payload: LibraryUpdate, session: SessionDep,
     library = session.get(LibraryRoot, library_id)
     if not library:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Library not found")
+    if library.deleted_at:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Library is being deleted")
     if payload.name is not None:
         name = payload.name.strip()
         if not name:
@@ -102,81 +106,32 @@ def update_library(library_id: int, payload: LibraryUpdate, session: SessionDep,
 
 
 @router.delete("/libraries/{library_id}")
-def delete_library(library_id: int, request: Request, session: SessionDep, _: AdminUser) -> dict[str, bool]:
+def delete_library(
+    library_id: int,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    session: SessionDep,
+    _: AdminUser,
+) -> dict[str, bool]:
     library = session.get(LibraryRoot, library_id)
     if not library:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Library not found")
+    if library.deleted_at:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Library is already being deleted")
 
-    assets = session.exec(select(Asset).where(Asset.library_id == library_id)).all()
-    folders = session.exec(select(Folder).where(Folder.library_id == library_id)).all()
-    asset_ids = [asset.id for asset in assets if asset.id is not None]
-    folder_ids = [folder.id for folder in folders if folder.id is not None]
+    active_job = active_scan_job(session, library_id)
+    if active_job:
+        request_cancel_scan_job(active_job.id or 0)
 
-    if asset_ids or folder_ids:
-        share_conditions = []
-        if asset_ids:
-            share_conditions.append(ShareLink.asset_id.in_(asset_ids))  # type: ignore[attr-defined]
-        if folder_ids:
-            share_conditions.append(ShareLink.folder_id.in_(folder_ids))  # type: ignore[attr-defined]
-        shares = session.exec(select(ShareLink).where(or_(*share_conditions))).all()
-        for share in shares:
-            session.delete(share)
-
-    if asset_ids:
-        favorites = session.exec(select(AssetFavorite).where(AssetFavorite.asset_id.in_(asset_ids))).all()  # type: ignore[attr-defined]
-        for favorite in favorites:
-            session.delete(favorite)
-        tags = session.exec(select(AssetTag).where(AssetTag.asset_id.in_(asset_ids))).all()  # type: ignore[attr-defined]
-        for tag in tags:
-            session.delete(tag)
-        metadata_rows = session.exec(select(AssetMetadata).where(AssetMetadata.asset_id.in_(asset_ids))).all()  # type: ignore[attr-defined]
-        for metadata in metadata_rows:
-            session.delete(metadata)
-
-        album_assets = session.exec(select(PhotoAlbumAsset).where(PhotoAlbumAsset.asset_id.in_(asset_ids))).all()  # type: ignore[attr-defined]
-        for album_asset in album_assets:
-            session.delete(album_asset)
-        cover_albums = session.exec(select(PhotoAlbum).where(PhotoAlbum.cover_asset_id.in_(asset_ids))).all()  # type: ignore[attr-defined]
-        for album in cover_albums:
-            album.cover_asset_id = None
-
-        multi_share_assets = session.exec(select(ShareAsset).where(ShareAsset.asset_id.in_(asset_ids))).all()
-        affected_share_ids = {sa.share_id for sa in multi_share_assets}
-        for sa in multi_share_assets:
-            session.delete(sa)
-        session.flush()
-        for sid in affected_share_ids:
-            remaining = session.exec(select(ShareAsset).where(ShareAsset.share_id == sid)).all()
-            if not remaining:
-                share = session.get(ShareLink, sid)
-                if share:
-                    session.delete(share)
-
-    if asset_ids:
-        thumbnails = session.exec(select(Thumbnail).where(Thumbnail.asset_id.in_(asset_ids))).all()  # type: ignore[attr-defined]
-        for thumbnail in thumbnails:
-            _unlink_thumbnail_file(thumbnail.path)
-            session.delete(thumbnail)
-
-    for folder in folders:
-        folder.cover_asset_id = None
-        folder.parent_id = None
-    session.flush()
-
-    for permission in session.exec(select(LibraryPermission).where(LibraryPermission.library_id == library_id)).all():
-        session.delete(permission)
-    for job in session.exec(select(ScanJob).where(ScanJob.library_id == library_id)).all():
-        session.delete(job)
-    for asset in assets:
-        session.delete(asset)
-    for folder in folders:
-        session.delete(folder)
-    session.delete(library)
+    library.is_enabled = False
+    library.deleted_at = utc_now()
     session.commit()
 
     watcher = getattr(request.app.state, "library_watcher", None)
     if watcher:
         watcher.refresh()
+
+    background_tasks.add_task(_delete_library_cleanup, library_id)
     return {"ok": True}
 
 
@@ -190,6 +145,77 @@ def _unlink_thumbnail_file(path: str) -> None:
         thumbnail_path.unlink(missing_ok=True)
     except OSError:
         return
+
+
+def _delete_library_cleanup(library_id: int) -> None:
+    from sqlmodel import Session
+
+    from app.db import engine
+
+    with Session(engine) as cleanup_session:
+        assets = cleanup_session.exec(select(Asset).where(Asset.library_id == library_id)).all()
+        folders = cleanup_session.exec(select(Folder).where(Folder.library_id == library_id)).all()
+        asset_ids = [a.id for a in assets if a.id is not None]
+        folder_ids = [f.id for f in folders if f.id is not None]
+
+        if asset_ids or folder_ids:
+            share_conditions = []
+            if asset_ids:
+                share_conditions.append(ShareLink.asset_id.in_(asset_ids))  # type: ignore[attr-defined]
+            if folder_ids:
+                share_conditions.append(ShareLink.folder_id.in_(folder_ids))  # type: ignore[attr-defined]
+            shares = cleanup_session.exec(select(ShareLink).where(or_(*share_conditions))).all()
+            for share in shares:
+                cleanup_session.delete(share)
+
+        if asset_ids:
+            for model in (AssetFavorite, AssetTag, AssetMetadata):
+                rows = cleanup_session.exec(select(model).where(model.asset_id.in_(asset_ids))).all()  # type: ignore[attr-defined]
+                for row in rows:
+                    cleanup_session.delete(row)
+
+            album_assets = cleanup_session.exec(select(PhotoAlbumAsset).where(PhotoAlbumAsset.asset_id.in_(asset_ids))).all()  # type: ignore[attr-defined]
+            for aa in album_assets:
+                cleanup_session.delete(aa)
+            cover_albums = cleanup_session.exec(select(PhotoAlbum).where(PhotoAlbum.cover_asset_id.in_(asset_ids))).all()  # type: ignore[attr-defined]
+            for album in cover_albums:
+                album.cover_asset_id = None
+
+            multi_share_assets = cleanup_session.exec(select(ShareAsset).where(ShareAsset.asset_id.in_(asset_ids))).all()
+            affected_share_ids = {sa.share_id for sa in multi_share_assets}
+            for sa in multi_share_assets:
+                cleanup_session.delete(sa)
+            cleanup_session.flush()
+            for sid in affected_share_ids:
+                if not cleanup_session.exec(select(ShareAsset).where(ShareAsset.share_id == sid)).all():
+                    share = cleanup_session.get(ShareLink, sid)
+                    if share:
+                        cleanup_session.delete(share)
+
+        if asset_ids:
+            thumbnails = cleanup_session.exec(select(Thumbnail).where(Thumbnail.asset_id.in_(asset_ids))).all()  # type: ignore[attr-defined]
+            for thumb in thumbnails:
+                _unlink_thumbnail_file(thumb.path)
+                cleanup_session.delete(thumb)
+
+        for folder in folders:
+            folder.cover_asset_id = None
+            folder.parent_id = None
+        cleanup_session.flush()
+
+        for perm in cleanup_session.exec(select(LibraryPermission).where(LibraryPermission.library_id == library_id)).all():
+            cleanup_session.delete(perm)
+        for job in cleanup_session.exec(select(ScanJob).where(ScanJob.library_id == library_id)).all():
+            cleanup_session.delete(job)
+        for asset in assets:
+            cleanup_session.delete(asset)
+        for folder in folders:
+            cleanup_session.delete(folder)
+
+        library = cleanup_session.get(LibraryRoot, library_id)
+        if library:
+            cleanup_session.delete(library)
+        cleanup_session.commit()
 
 
 @router.post("/libraries/{library_id}/scan", response_model=ScanJobRead)
@@ -459,6 +485,8 @@ def update_user_permissions(
         library = session.get(LibraryRoot, item.library_id)
         if not library:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Library {item.library_id} not found")
+        if library.deleted_at:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Library {item.library_id} is being deleted")
         seen_library_ids.add(item.library_id)
         permission = by_library.get(item.library_id)
         if item.can_view:
@@ -590,3 +618,32 @@ def get_thumbnail_stats(session: SessionDep, _: AdminUser) -> ThumbnailStats:
         medium_count=count_map.get("medium", 0),
         large_count=count_map.get("large", 0),
     )
+
+
+@router.get("/settings", response_model=ServerSettingsRead)
+def get_settings(_: AdminUser) -> ServerSettingsRead:
+    import os
+
+    return ServerSettingsRead(
+        thumb_workers=get_thumb_workers(),
+        cpu_count=os.cpu_count(),
+        thumb_workers_default=settings.thumb_workers,
+    )
+
+
+@router.put("/settings", response_model=ServerSettingsRead)
+def update_settings(payload: ServerSettingsUpdate, _: AdminUser) -> ServerSettingsRead:
+    import os
+
+    set_thumb_workers(payload.thumb_workers)
+    return ServerSettingsRead(
+        thumb_workers=get_thumb_workers(),
+        cpu_count=os.cpu_count(),
+        thumb_workers_default=settings.thumb_workers,
+    )
+
+
+@router.delete("/settings/thumb-workers-reset")
+def reset_thumb_workers_endpoint(_: AdminUser) -> dict[str, bool]:
+    reset_thumb_workers()
+    return {"ok": True}

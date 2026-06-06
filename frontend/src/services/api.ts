@@ -14,6 +14,7 @@ import type {
   PhotoAlbum,
   PublicShare,
   ScanJob,
+  ServerSettings,
   ShareLink,
   ThumbnailStats,
   User,
@@ -97,6 +98,15 @@ export const api = {
   },
   thumbnailStats() {
     return request<ThumbnailStats>('/api/admin/thumbnail-stats');
+  },
+  serverSettings() {
+    return request<ServerSettings>('/api/admin/settings');
+  },
+  updateServerSettings(payload: { thumb_workers: number }) {
+    return request<ServerSettings>('/api/admin/settings', {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
   },
   users() {
     return request<User[]>('/api/admin/users');

@@ -40,6 +40,7 @@ def create_db_and_tables() -> None:
         ensure_initial_admin(session)
         disable_legacy_docker_photos_root_library(session)
         ensure_default_library(session)
+        resume_library_cleanups(session)
 
 
 def run_lightweight_migrations() -> None:
@@ -91,6 +92,10 @@ def run_lightweight_migrations() -> None:
     if "ix_asset_library_path" not in asset_indexes:
         with engine.begin() as connection:
             connection.execute(text("CREATE INDEX IF NOT EXISTS ix_asset_library_path ON asset(library_id, path)"))
+    library_columns = {column["name"] for column in inspector.get_columns("libraryroot")} if inspector.has_table("libraryroot") else set()
+    if "deleted_at" not in library_columns:
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE libraryroot ADD COLUMN deleted_at DATETIME"))
 
 
 def get_session() -> Generator[Session, None, None]:
@@ -156,3 +161,14 @@ def disable_legacy_docker_photos_root_library(session: Session) -> None:
         changed = True
     if changed:
         session.commit()
+
+
+def resume_library_cleanups(session: Session) -> None:
+    stalled = session.exec(select(LibraryRoot).where(LibraryRoot.deleted_at != None)).all()  # noqa: E711
+    if not stalled:
+        return
+    from app.api.admin import _delete_library_cleanup
+
+    for library in stalled:
+        library_id = library.id or 0
+        _delete_library_cleanup(library_id)

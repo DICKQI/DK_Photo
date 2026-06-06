@@ -95,14 +95,15 @@
           <span>{{ t('admin.noMatchingLibrariesHint') }}</span>
         </div>
         <div v-else class="table-list">
-          <div v-for="library in filteredLibraries" :key="library.id" class="table-row library-row">
+          <div v-for="library in filteredLibraries" :key="library.id" class="table-row library-row" :class="{ 'deleting-row': library.deleted_at }">
             <div class="row-title">
               <span class="row-icon">
-                <FolderOpen :size="20" />
+                <LoaderCircle v-if="library.deleted_at" class="spin" :size="20" />
+                <FolderOpen v-else :size="20" />
               </span>
               <div class="library-row-body">
                 <input
-                  v-if="editingLibraryId === library.id"
+                  v-if="editingLibraryId === library.id && !library.deleted_at"
                   v-model="libraryEditBuffer[library.id]"
                   class="library-name-input"
                   :placeholder="t('admin.libraryName')"
@@ -114,38 +115,44 @@
               </div>
             </div>
             <div class="row-actions">
-              <small class="status-pill neutral">{{ library.last_scan_at ? formatDateTime(library.last_scan_at) : t('common.neverScanned') }}</small>
-              <template v-if="editingLibraryId === library.id">
-                <button class="secondary-button" :disabled="!isLibraryNameChanged(library) || isBusy(librarySaveKey(library.id))" @click="saveLibraryName(library)">
-                  <LoaderCircle v-if="isBusy(librarySaveKey(library.id))" class="spin" :size="17" />
-                  <Save v-else :size="17" />
-                  {{ isBusy(librarySaveKey(library.id)) ? t('common.saving') : t('common.save') }}
+              <template v-if="library.deleted_at">
+                <small class="status-pill active">{{ t('admin.deletingLibrary') }}</small>
+              </template>
+              <template v-else>
+                <small class="status-pill neutral">{{ library.last_scan_at ? formatDateTime(library.last_scan_at) : t('common.neverScanned') }}</small>
+                <template v-if="editingLibraryId === library.id">
+                  <button class="secondary-button" :disabled="!isLibraryNameChanged(library) || isBusy(librarySaveKey(library.id))" @click="saveLibraryName(library)">
+                    <LoaderCircle v-if="isBusy(librarySaveKey(library.id))" class="spin" :size="17" />
+                    <Save v-else :size="17" />
+                    {{ isBusy(librarySaveKey(library.id)) ? t('common.saving') : t('common.save') }}
+                  </button>
+                  <button class="secondary-button" :disabled="isBusy(librarySaveKey(library.id))" @click="cancelLibraryEdit">
+                    <X :size="17" />
+                    {{ t('common.cancel') }}
+                  </button>
+                </template>
+                <button v-else class="secondary-button" :title="t('admin.editLibraryName')" @click="editLibrary(library)">
+                  <Pencil :size="17" />
+                  {{ t('common.edit') }}
                 </button>
-                <button class="secondary-button" :disabled="isBusy(librarySaveKey(library.id))" @click="cancelLibraryEdit">
-                  <X :size="17" />
-                  {{ t('common.cancel') }}
+                <button class="primary-button" :disabled="isBusy(scanKey(library.id))" @click="scan(library.id)">
+                  <LoaderCircle v-if="isBusy(scanKey(library.id))" class="spin" :size="17" />
+                  <ScanLine v-else :size="17" />
+                  {{ isBusy(scanKey(library.id)) ? t('admin.queued') : t('admin.scan') }}
+                </button>
+                <button class="danger-button" :disabled="isBusy(libraryDeleteKey(library.id))" @click="openDeleteLibrary(library)">
+                  <LoaderCircle v-if="isBusy(libraryDeleteKey(library.id))" class="spin" :size="17" />
+                  <Trash2 v-else :size="17" />
+                  {{ t('common.delete') }}
                 </button>
               </template>
-              <button v-else class="secondary-button" :title="t('admin.editLibraryName')" @click="editLibrary(library)">
-                <Pencil :size="17" />
-                {{ t('common.edit') }}
-              </button>
-              <button class="primary-button" :disabled="isBusy(scanKey(library.id))" @click="scan(library.id)">
-                <LoaderCircle v-if="isBusy(scanKey(library.id))" class="spin" :size="17" />
-                <ScanLine v-else :size="17" />
-                {{ isBusy(scanKey(library.id)) ? t('admin.queued') : t('admin.scan') }}
-              </button>
-              <button class="danger-button" :disabled="isBusy(libraryDeleteKey(library.id))" @click="openDeleteLibrary(library)">
-                <LoaderCircle v-if="isBusy(libraryDeleteKey(library.id))" class="spin" :size="17" />
-                <Trash2 v-else :size="17" />
-                {{ t('common.delete') }}
-              </button>
             </div>
           </div>
         </div>
       </article>
 
-      <article class="admin-panel users-panel wide-panel">
+      <div class="admin-grid-row admin-users-settings-grid">
+      <article class="admin-panel users-panel">
           <header>
             <div>
               <h2>{{ t('admin.usersTitle') }}</h2>
@@ -256,6 +263,59 @@
           </div>
       </article>
 
+      <article class="admin-panel settings-panel">
+        <header>
+          <div>
+            <h2>{{ t('admin.settingsTitle') }}</h2>
+            <p class="panel-note">{{ t('admin.settingsNote') }}</p>
+          </div>
+        </header>
+        <div v-if="settingsLoading" class="panel-empty">
+          <LoaderCircle class="spin" :size="24" />
+          <strong>{{ t('admin.loadingAccess') }}</strong>
+        </div>
+        <div v-else-if="serverSettingsError" class="panel-empty">
+          <CircleAlert :size="24" />
+          <strong>{{ t('admin.unableLoadSettings') }}</strong>
+          <span>{{ serverSettingsError }}</span>
+          <button class="secondary-button" @click="loadServerSettings">{{ t('common.retry') }}</button>
+        </div>
+        <div v-else-if="serverSettings" class="settings-form">
+          <div class="settings-field">
+            <strong class="settings-label">{{ t('admin.thumbWorkersLabel') }}</strong>
+            <span class="settings-hint">{{ t('admin.thumbWorkersHint') }}</span>
+            <div class="settings-input-group">
+              <select v-model.number="settingsEditBuffer.thumb_workers" class="settings-select">
+                <option v-for="opt in thumbWorkerOptions" :key="opt" :value="opt">{{ opt }}</option>
+              </select>
+              <small class="settings-meta">
+                {{ t('admin.thumbWorkersDefault', { count: serverSettings.thumb_workers_default }) }}
+                <span v-if="serverSettings.cpu_count"> · {{ t('admin.thumbWorkersCpuCores', { count: serverSettings.cpu_count }) }}</span>
+              </small>
+            </div>
+          </div>
+          <footer class="settings-actions">
+            <button
+              class="secondary-button"
+              :disabled="isBusy(settingsSaveKey)"
+              @click="resetSettings"
+            >
+              {{ t('common.reset') }}
+            </button>
+            <button
+              class="primary-button"
+              :disabled="isBusy(settingsSaveKey) || !isSettingsChanged"
+              @click="saveServerSettings"
+            >
+              <LoaderCircle v-if="isBusy(settingsSaveKey)" class="spin" :size="17" />
+              <Save v-else :size="17" />
+              {{ isBusy(settingsSaveKey) ? t('common.saving') : t('common.save') }}
+            </button>
+          </footer>
+        </div>
+      </article>
+      </div>
+
       <div class="admin-grid-row admin-monitor-grid">
       <article class="admin-panel monitor-panel">
         <header>
@@ -313,7 +373,12 @@
                 </button>
                 <small v-if="job.status === 'running' || job.status === 'queued'">
                   <LoaderCircle class="spin" :size="12" />
-                  {{ t('admin.scanningProgress', { count: job.processed_assets.toLocaleString() }) }}
+                  <template v-if="job.total_estimated && job.total_estimated > 0">
+                    {{ t('admin.scanningProgressTotal', { count: job.processed_assets.toLocaleString(), total: job.total_estimated.toLocaleString() }) }}
+                  </template>
+                  <template v-else>
+                    {{ t('admin.scanningProgress', { count: job.processed_assets.toLocaleString() }) }}
+                  </template>
                 </small>
                 <small v-else>{{ formatCount(job.total_assets, 'media') }}</small>
                 <small class="muted">{{ jobTimeLabel(job) }}</small>
@@ -624,7 +689,7 @@ import LanguageToggle from '../components/LanguageToggle.vue';
 import { useLocale } from '../composables/useLocale';
 import { useTheme } from '../composables/useTheme';
 import { api } from '../services/api';
-import type { Library, LibraryPermission, ScanJob, ShareLink, ThumbnailStats, User } from '../types';
+import type { Library, LibraryPermission, ScanJob, ServerSettings, ShareLink, ThumbnailStats, User } from '../types';
 
 const libraries = ref<Library[]>([]);
 const { isDark, toggleTheme } = useTheme();
@@ -633,6 +698,10 @@ const jobs = ref<ScanJob[]>([]);
 const users = ref<User[]>([]);
 const shares = ref<ShareLink[]>([]);
 const thumbnailStats = ref<ThumbnailStats>({ total_count: 0, total_size_bytes: 0, small_count: 0, medium_count: 0, large_count: 0 });
+const serverSettings = ref<ServerSettings | null>(null);
+const serverSettingsError = ref('');
+const settingsLoading = ref(false);
+const settingsEditBuffer = reactive({ thumb_workers: 0 });
 const libraryName = ref('Family Photos');
 const libraryPath = ref('');
 const message = ref('');
@@ -670,6 +739,7 @@ let messageTimer: ReturnType<typeof setTimeout> | null = null;
 
 const activeUserCount = computed(() => users.value.filter((user) => user.is_active).length);
 const runningJobCount = computed(() => jobs.value.filter((job) => ['queued', 'running'].includes(job.status)).length);
+const deletingLibraryCount = computed(() => libraries.value.filter((lib) => lib.deleted_at).length);
 const activeShareCount = computed(() => shares.value.filter((share) => !share.revoked_at && !isShareExpired(share)).length);
 const isWorking = computed(() => Object.keys(busyKeys).length > 0);
 const permissionLoading = computed(() => (permissionUser.value ? isBusy(permissionLoadKey(permissionUser.value.id)) : false));
@@ -722,6 +792,9 @@ function startJobPolling() {
   pollTimer = setInterval(async () => {
     try {
       jobs.value = await api.jobs();
+      if (deletingLibraryCount.value > 0) {
+        libraries.value = await api.libraries();
+      }
     } catch {
       stopJobPolling();
     }
@@ -736,7 +809,7 @@ function stopJobPolling() {
 }
 
 watch(
-  () => runningJobCount.value,
+  () => runningJobCount.value + deletingLibraryCount.value,
   (count) => {
     if (count > 0) {
       startJobPolling();
@@ -766,6 +839,7 @@ async function loadAdminData() {
   users.value = await api.users();
   shares.value = await api.adminShares();
   thumbnailStats.value = await api.thumbnailStats();
+  await loadServerSettings();
   syncLibraryEditBuffer();
   syncEditBuffer();
 }
@@ -1155,6 +1229,8 @@ function userDeleteKey(id: number) {
   return `user:delete:${id}`;
 }
 
+const settingsSaveKey = 'settings:save';
+
 function showMessage(value: string, kind: 'success' | 'error' = 'success') {
   message.value = value;
   messageKind.value = kind;
@@ -1180,7 +1256,8 @@ function libraryNameById(libraryId: number) {
 }
 
 function librarySearchText(library: Library) {
-  return [library.name, library.path, library.last_scan_at ? formatDateTime(library.last_scan_at) : t('common.neverScanned')].join(' ').toLowerCase();
+  const status = library.deleted_at ? t('admin.deletingLibrary') : (library.last_scan_at ? formatDateTime(library.last_scan_at) : t('common.neverScanned'));
+  return [library.name, library.path, status].join(' ').toLowerCase();
 }
 
 function jobTimeLabel(job: ScanJob) {
@@ -1331,6 +1408,53 @@ function formatBytes(bytes: number): string {
   const i = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
   const value = bytes / 1024 ** i;
   return `${value.toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
+}
+
+const isSettingsChanged = computed(() => {
+  if (!serverSettings.value) return false;
+  return settingsEditBuffer.thumb_workers !== serverSettings.value.thumb_workers;
+});
+
+const thumbWorkerOptions = computed(() => {
+  const cpuCount = serverSettings.value?.cpu_count || 4;
+  const max = Math.max(2, cpuCount);
+  const options: number[] = [];
+  for (let i = 1; i <= max; i++) {
+    options.push(i);
+  }
+  return options;
+});
+
+async function loadServerSettings() {
+  settingsLoading.value = true;
+  serverSettingsError.value = '';
+  try {
+    serverSettings.value = await api.serverSettings();
+    settingsEditBuffer.thumb_workers = serverSettings.value.thumb_workers;
+  } catch (err) {
+    serverSettingsError.value = errorMessage(err, t('admin.unableLoadSettings'));
+  } finally {
+    settingsLoading.value = false;
+  }
+}
+
+async function saveServerSettings() {
+  startBusy(settingsSaveKey);
+  try {
+    const updated = await api.updateServerSettings({ thumb_workers: settingsEditBuffer.thumb_workers });
+    serverSettings.value = updated;
+    settingsEditBuffer.thumb_workers = updated.thumb_workers;
+    showMessage(t('admin.settingsSaved'));
+  } catch (err) {
+    showMessage(errorMessage(err, t('admin.unableSaveSettings')), 'error');
+  } finally {
+    stopBusy(settingsSaveKey);
+  }
+}
+
+function resetSettings() {
+  if (!serverSettings.value) return;
+  settingsEditBuffer.thumb_workers = serverSettings.value.thumb_workers_default;
 }
 
 function jobStatusLabel(status: string) {

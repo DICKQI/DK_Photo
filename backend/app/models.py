@@ -40,6 +40,7 @@ class LibraryRoot(SQLModel, table=True):
     is_enabled: bool = Field(default=True, index=True)
     created_at: datetime = Field(default_factory=utc_now)
     last_scan_at: Optional[datetime] = None
+    deleted_at: Optional[datetime] = Field(default=None, index=True)
 
 
 class Folder(SQLModel, table=True):

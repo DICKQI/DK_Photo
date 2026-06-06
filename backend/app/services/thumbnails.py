@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import concurrent.futures
 import hashlib
-import os
 import threading
 from pathlib import Path
 
@@ -10,7 +9,7 @@ from PIL import Image, ImageDraw, ImageOps
 from sqlalchemy.exc import OperationalError
 from sqlmodel import Session, select
 
-from app.config import settings
+from app.config import get_thumb_workers, settings
 from app.models import Asset, LibraryRoot, Thumbnail
 from app.services.paths import safe_asset_path
 
@@ -20,8 +19,6 @@ THUMBNAIL_SIZES: dict[str, tuple[int, int]] = {
     "medium": (720, 720),
     "large": (1440, 1440),
 }
-
-DEFAULT_THUMB_WORKERS = max(2, (os.cpu_count() or 4) // 2)
 
 
 def thumbnail_cache_path(asset: Asset, size: str) -> Path:
@@ -189,9 +186,11 @@ def bulk_generate_thumbnails(
     session: Session,
     asset_ids: list[int],
     size: str = "small",
-    max_workers: int = DEFAULT_THUMB_WORKERS,
+    max_workers: int | None = None,
     cancel_event: threading.Event | None = None,
 ) -> int:
+    if max_workers is None:
+        max_workers = get_thumb_workers()
     if size not in THUMBNAIL_SIZES:
         size = "small"
     if not asset_ids:

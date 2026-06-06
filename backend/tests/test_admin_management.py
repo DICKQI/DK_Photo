@@ -471,16 +471,12 @@ def test_delete_library_removes_index_and_keeps_original_files(tmp_path: Path) -
         assert delete_response.json() == {"ok": True}
 
         with Session(test_engine) as session:
-            assert session.get(LibraryRoot, library_id) is None
-            assert not session.exec(select(Asset).where(Asset.library_id == library_id)).all()
-            assert not session.exec(select(AssetTag)).all()
-            assert not session.exec(select(Folder).where(Folder.library_id == library_id)).all()
-            assert not session.exec(select(Thumbnail)).all()
-            assert not session.exec(select(LibraryPermission).where(LibraryPermission.library_id == library_id)).all()
-            assert not session.exec(select(ScanJob).where(ScanJob.library_id == library_id)).all()
-            assert not session.exec(select(ShareLink)).all()
+            library = session.get(LibraryRoot, library_id)
+            assert library is not None
+            assert library.deleted_at is not None
+            assert library.is_enabled is False
+            assert not session.exec(select(LibraryRoot).where(LibraryRoot.id == library_id, LibraryRoot.deleted_at == None)).all()
         assert original_photo.exists()
-        assert not thumbnail_path.exists()
     app.dependency_overrides.clear()
 
 
@@ -1104,7 +1100,10 @@ def test_asset_metadata_is_per_user_searchable_and_filterable(tmp_path: Path) ->
         delete_library = client.delete(f"/api/admin/libraries/{allowed['id']}")
         assert delete_library.status_code == 200, delete_library.text
         with Session(test_engine) as session:
-            assert not session.exec(select(AssetMetadata).where(AssetMetadata.asset_id == keeper_id)).all()
+            library = session.get(LibraryRoot, allowed["id"])
+            assert library is not None
+            assert library.deleted_at is not None
+            assert library.is_enabled is False
             assert session.exec(select(AssetMetadata).where(AssetMetadata.asset_id == hidden_id)).one().rating == 5
 
     app.dependency_overrides.clear()

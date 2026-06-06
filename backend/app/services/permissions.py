@@ -3,12 +3,15 @@ from __future__ import annotations
 from fastapi import HTTPException, status
 from sqlmodel import Session, select
 
-from app.models import Asset, Folder, LibraryPermission, User
+from app.models import Asset, Folder, LibraryPermission, LibraryRoot, User
 
 
 def accessible_library_ids(session: Session, user: User, require_share: bool = False) -> list[int] | None:
     if user.role == "admin":
-        return None
+        rows = session.exec(
+            select(LibraryRoot.id).where(LibraryRoot.deleted_at == None, LibraryRoot.is_enabled == True)
+        ).all()
+        return [row for row in rows]
     statement = select(LibraryPermission).where(
         LibraryPermission.user_id == user.id,
         LibraryPermission.can_view == True,  # noqa: E712
@@ -16,12 +19,21 @@ def accessible_library_ids(session: Session, user: User, require_share: bool = F
     if require_share:
         statement = statement.where(LibraryPermission.can_share == True)  # noqa: E712
     permissions = session.exec(statement).all()
-    return [permission.library_id for permission in permissions]
+    allowed = [permission.library_id for permission in permissions]
+    if allowed:
+        existing = session.exec(
+            select(LibraryRoot.id).where(LibraryRoot.id.in_(allowed), LibraryRoot.deleted_at == None)
+        ).all()
+        return [row for row in existing]
+    return []
 
 
 def can_access_library(session: Session, user: User, library_id: int, require_share: bool = False) -> bool:
     if user.role == "admin":
-        return True
+        library = session.exec(
+            select(LibraryRoot).where(LibraryRoot.id == library_id, LibraryRoot.deleted_at == None)
+        ).first()
+        return library is not None
     statement = select(LibraryPermission).where(
         LibraryPermission.user_id == user.id,
         LibraryPermission.library_id == library_id,

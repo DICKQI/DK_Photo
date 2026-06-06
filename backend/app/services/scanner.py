@@ -617,6 +617,16 @@ def folder_path_contains(parent_path: str, child_path: str) -> bool:
     return parent_path == "" or child_path == parent_path or child_path.startswith(f"{parent_path}/")
 
 
+def _count_media_files(root: Path) -> int:
+    count = 0
+    for _directory, subdirs, filenames in root.walk():
+        subdirs[:] = [name for name in subdirs if not name.startswith(".")]
+        for filename in filenames:
+            if Path(filename).suffix.lower() in SUPPORTED_EXTENSIONS:
+                count += 1
+    return count
+
+
 def scan_library(
     session: Session,
     library_id: int,
@@ -637,6 +647,11 @@ def scan_library(
     if not is_existing_directory:
         return 0
 
+    if job and job.total_estimated is None:
+        job.total_estimated = _count_media_files(root)
+        session.add(job)
+        session.commit()
+
     folder_cache: dict[str, Folder] = {}
     seen_folder_paths: set[str] = set()
     seen_asset_paths: set[str] = set()
@@ -648,9 +663,9 @@ def scan_library(
     thumb_futures: list[concurrent.futures.Future] = []
 
     if generate_thumbnails:
-        from app.services.thumbnails import DEFAULT_THUMB_WORKERS
+        from app.config import get_thumb_workers
 
-        executor = concurrent.futures.ThreadPoolExecutor(max_workers=DEFAULT_THUMB_WORKERS)
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=get_thumb_workers())
 
     try:
         for directory, subdirs, filenames in root.walk():

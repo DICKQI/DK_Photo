@@ -35,6 +35,7 @@ class LibraryRead(BaseModel):
     is_enabled: bool
     created_at: datetime
     last_scan_at: Optional[datetime]
+    deleted_at: Optional[datetime] = None
 
 
 class FolderRead(BaseModel):
@@ -305,3 +306,13 @@ class ThumbnailStats(BaseModel):
     small_count: int = 0
     medium_count: int = 0
     large_count: int = 0
+
+
+class ServerSettingsRead(BaseModel):
+    thumb_workers: int
+    cpu_count: int | None
+    thumb_workers_default: int
+
+
+class ServerSettingsUpdate(BaseModel):
+    thumb_workers: int = Field(ge=1, le=64)

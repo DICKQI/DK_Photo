@@ -13,6 +13,7 @@ export interface Library {
   is_enabled: boolean;
   created_at: string;
   last_scan_at: string | null;
+  deleted_at: string | null;
 }
 
 export interface LibraryUpdate {
@@ -123,6 +124,12 @@ export interface ThumbnailStats {
   small_count: number;
   medium_count: number;
   large_count: number;
+}
+
+export interface ServerSettings {
+  thumb_workers: number;
+  cpu_count: number | null;
+  thumb_workers_default: number;
 }
 
 export interface ShareLink {
