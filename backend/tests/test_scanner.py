@@ -292,7 +292,7 @@ def test_cancelled_thumbnail_generation_marks_job_cancelled(tmp_path: Path) -> N
         assert updated is not None
         assert updated.status == "cancelled"
         assert updated.total_assets == 1
-        assert updated.message == "Indexed 1 media items (thumbnail generation cancelled)"
+        assert updated.message == "Scan cancelled after 1 items"
 
 
 def test_scan_job_preserves_thumbnail_generation_message(tmp_path: Path) -> None:
@@ -451,3 +451,99 @@ def test_refresh_folder_counts_uses_latest_mtime_for_cover(tmp_path: Path) -> No
         refresh_folder_counts(session, library)
         session.refresh(folder)
         assert folder.cover_asset_id is None
+
+
+def test_pipeline_generates_thumbnails_for_images(tmp_path: Path) -> None:
+    old_data_dir = settings.data_dir
+    object.__setattr__(settings, "data_dir", (tmp_path / "data").resolve())
+    try:
+        photo_root = tmp_path / "pipeline-thumbs"
+        for i in range(5):
+            create_photo(photo_root / f"img{i}.jpg")
+
+        with make_session(tmp_path) as session:
+            library = LibraryRoot(name="Pipeline Thumbs", path=str(photo_root.resolve()))
+            session.add(library)
+            session.commit()
+            session.refresh(library)
+
+            total = scan_library(session, library.id or 0, generate_thumbnails=True)
+            assert total == 5
+
+            thumbnails = session.exec(select(Thumbnail)).all()
+            assert len(thumbnails) == 10  # 5 images * 2 sizes (small + medium)
+            for thumb in thumbnails:
+                assert Path(thumb.path).exists()
+
+            sizes = {thumb.size for thumb in thumbnails}
+            assert sizes == {"small", "medium"}
+    finally:
+        object.__setattr__(settings, "data_dir", old_data_dir)
+
+
+def test_pipeline_skips_unchanged_images(tmp_path: Path) -> None:
+    old_data_dir = settings.data_dir
+    object.__setattr__(settings, "data_dir", (tmp_path / "data").resolve())
+    try:
+        photo_root = tmp_path / "pipeline-skip"
+        create_photo(photo_root / "one.jpg")
+
+        with make_session(tmp_path) as session:
+            library = LibraryRoot(name="Pipeline Skip", path=str(photo_root.resolve()))
+            session.add(library)
+            session.commit()
+            session.refresh(library)
+
+            scan_library(session, library.id or 0, generate_thumbnails=True)
+            first_thumbnails = session.exec(select(Thumbnail)).all()
+            assert len(first_thumbnails) == 2
+
+            scan_library(session, library.id or 0, generate_thumbnails=True)
+            second_thumbnails = session.exec(select(Thumbnail)).all()
+            assert len(second_thumbnails) == 2
+
+            assert {t.id for t in first_thumbnails} == {t.id for t in second_thumbnails}
+    finally:
+        object.__setattr__(settings, "data_dir", old_data_dir)
+
+
+def test_pipeline_no_thumbnails_when_disabled(tmp_path: Path) -> None:
+    old_data_dir = settings.data_dir
+    object.__setattr__(settings, "data_dir", (tmp_path / "data").resolve())
+    try:
+        photo_root = tmp_path / "pipeline-off"
+        create_photo(photo_root / "one.jpg")
+        create_photo(photo_root / "two.jpg")
+
+        with make_session(tmp_path) as session:
+            library = LibraryRoot(name="Pipeline Off", path=str(photo_root.resolve()))
+            session.add(library)
+            session.commit()
+            session.refresh(library)
+
+            total = scan_library(session, library.id or 0, generate_thumbnails=False)
+            assert total == 2
+            assert session.exec(select(Thumbnail)).all() == []
+    finally:
+        object.__setattr__(settings, "data_dir", old_data_dir)
+
+
+def test_pipeline_empty_library_no_thumbnails(tmp_path: Path) -> None:
+    old_data_dir = settings.data_dir
+    object.__setattr__(settings, "data_dir", (tmp_path / "data").resolve())
+    try:
+        photo_root = tmp_path / "pipeline-empty"
+        photo_root.mkdir()
+        (photo_root / "readme.txt").write_text("hello")
+
+        with make_session(tmp_path) as session:
+            library = LibraryRoot(name="Pipeline Empty", path=str(photo_root.resolve()))
+            session.add(library)
+            session.commit()
+            session.refresh(library)
+
+            total = scan_library(session, library.id or 0, generate_thumbnails=True)
+            assert total == 0
+            assert session.exec(select(Thumbnail)).all() == []
+    finally:
+        object.__setattr__(settings, "data_dir", old_data_dir)

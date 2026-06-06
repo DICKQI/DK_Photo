@@ -285,3 +285,71 @@ def bulk_generate_thumbnails(
 
     saved = _save_thumbnail_results(session, results, size)
     return generated_count + saved
+
+
+def _thumbnail_hash_path(asset_id: int, asset_path: str, mtime: float, size: str) -> Path:
+    digest = hashlib.sha1(f"{asset_id}:{asset_path}:{mtime}:{size}".encode("utf-8")).hexdigest()
+    return settings.thumbnail_dir / digest[:2] / f"{digest}.webp"
+
+
+def generate_thumbnail_disk_only(
+    asset_id: int,
+    library_path: str,
+    asset_path: str,
+    mtime: float,
+    mime_type: str,
+    size: str,
+) -> dict | None:
+    if size not in THUMBNAIL_SIZES:
+        return None
+    max_size = THUMBNAIL_SIZES[size]
+    output_path = _thumbnail_hash_path(asset_id, asset_path, mtime, size)
+    if output_path.exists():
+        return None
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if mime_type.startswith("video/"):
+        width, height = write_video_placeholder(output_path, max_size)
+    else:
+        original_path = safe_asset_path(library_path, asset_path)
+        if not original_path.exists():
+            return None
+        dims = _generate_thumbnail_file(original_path, output_path, max_size)
+        if dims is None:
+            return None
+        width, height = dims
+
+    return {
+        "asset_id": asset_id,
+        "size": size,
+        "path": str(output_path),
+        "width": width,
+        "height": height,
+    }
+
+
+def flush_thumbnails(session: Session, results: list[dict]) -> None:
+    for entry in results:
+        existing = session.exec(
+            select(Thumbnail).where(
+                Thumbnail.asset_id == entry["asset_id"],
+                Thumbnail.size == entry["size"],
+            )
+        ).first()
+        new_path = Path(entry["path"])
+        if existing:
+            _delete_old_thumbnail(existing, new_path)
+            existing.path = entry["path"]
+            existing.width = entry["width"]
+            existing.height = entry["height"]
+        else:
+            session.add(
+                Thumbnail(
+                    asset_id=entry["asset_id"],
+                    size=entry["size"],
+                    path=entry["path"],
+                    width=entry["width"],
+                    height=entry["height"],
+                )
+            )
+    session.commit()

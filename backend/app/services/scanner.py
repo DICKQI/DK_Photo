@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import concurrent.futures
 import mimetypes
 import threading
 from datetime import datetime
@@ -640,6 +641,16 @@ def scan_library(
     seen_folder_paths: set[str] = set()
     seen_asset_paths: set[str] = set()
     total = 0
+    thumb_results: list[dict] = []
+    pending_images: list[Asset] = []
+    completed_thumbs: set[tuple[int, str]] = set()
+    executor: concurrent.futures.ThreadPoolExecutor | None = None
+    thumb_futures: list[concurrent.futures.Future] = []
+
+    if generate_thumbnails:
+        from app.services.thumbnails import DEFAULT_THUMB_WORKERS
+
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=DEFAULT_THUMB_WORKERS)
 
     try:
         for directory, subdirs, filenames in root.walk():
@@ -658,22 +669,55 @@ def scan_library(
                 seen_asset_paths.add(asset.path)
                 total += 1
 
+                if generate_thumbnails and asset.mime_type.startswith("image/"):
+                    pending_images.append(asset)
+
+                if total % BATCH_SIZE == 0:
+                    session.commit()
+                    if generate_thumbnails and pending_images and executor:
+                        _submit_pending_thumbnails(
+                            executor,
+                            pending_images,
+                            library.path,
+                            completed_thumbs,
+                            thumb_futures,
+                        )
+                        pending_images.clear()
+
                 if job and total % PROGRESS_INTERVAL == 0:
                     job.processed_assets = total
                     session.add(job)
                     session.commit()
-                elif total % BATCH_SIZE == 0:
-                    session.commit()
 
         session.commit()
+
+        if generate_thumbnails and pending_images and executor:
+            _submit_pending_thumbnails(
+                executor,
+                pending_images,
+                library.path,
+                completed_thumbs,
+                thumb_futures,
+            )
+            pending_images.clear()
+
+        if generate_thumbnails and executor:
+            _collect_thumbnail_results(thumb_futures, thumb_results, cancel_event)
+            thumb_futures.clear()
 
     except ScanCancelled:
         session.commit()
+
+        if generate_thumbnails and executor:
+            executor.shutdown(wait=False, cancel_futures=True)
 
         if job:
             _mark_job_cancelled(session, job, total, f"Scan cancelled after {total} items")
 
         return total
+    finally:
+        if executor:
+            executor.shutdown(wait=False)
 
     if job:
         job.processed_assets = total
@@ -686,43 +730,64 @@ def scan_library(
     library.last_scan_at = utc_now()
     session.commit()
 
-    if generate_thumbnails and total > 0:
-        try:
-            _check_cancelled(cancel_event)
+    if generate_thumbnails and total > 0 and thumb_results:
+        from app.services.thumbnails import flush_thumbnails
 
-            image_assets = session.exec(
-                select(Asset).where(
-                    Asset.library_id == library_id,
-                    Asset.mime_type.like("image/%"),
-                )
-            ).all()
-            if image_assets:
-                from app.services.thumbnails import bulk_generate_thumbnails
-
-                thumb_count = 0
-                asset_ids = [a.id for a in image_assets if a.id is not None]
-                for size in ("small", "medium"):
-                    _check_cancelled(cancel_event)
-                    thumb_count += bulk_generate_thumbnails(
-                        session,
-                        asset_ids,
-                        size=size,
-                        cancel_event=cancel_event,
-                    )
-                if job:
-                    job.message = f"Indexed {total} media items, {thumb_count} thumbnails generated"
-                    session.add(job)
-                    session.commit()
-        except ScanCancelled:
-            if job:
-                _mark_job_cancelled(
-                    session,
-                    job,
-                    total,
-                    f"Indexed {total} media items (thumbnail generation cancelled)",
-                )
+        flush_thumbnails(session, thumb_results)
+        thumb_count = len(thumb_results)
+        if job:
+            job.message = f"Indexed {total} media items, {thumb_count} thumbnails generated"
+            session.add(job)
+            session.commit()
+    elif job and generate_thumbnails and total > 0 and not thumb_results:
+        if "thumbnails generated" not in job.message:
+            job.message = f"Indexed {total} media items"
+            session.add(job)
+            session.commit()
 
     return total
+
+
+def _submit_pending_thumbnails(
+    executor: concurrent.futures.ThreadPoolExecutor,
+    pending: list[Asset],
+    library_path: str,
+    completed: set[tuple[int, str]],
+    futures_out: list[concurrent.futures.Future],
+) -> None:
+    from app.services.thumbnails import generate_thumbnail_disk_only
+
+    for asset in pending:
+        for size in ("small", "medium"):
+            key = (asset.id or 0, size)
+            if key in completed:
+                continue
+            completed.add(key)
+            future = executor.submit(
+                generate_thumbnail_disk_only,
+                asset_id=asset.id or 0,
+                library_path=library_path,
+                asset_path=asset.path,
+                mtime=asset.mtime,
+                mime_type=asset.mime_type,
+                size=size,
+            )
+            futures_out.append(future)
+
+
+def _collect_thumbnail_results(
+    futures: list[concurrent.futures.Future],
+    results: list[dict],
+    cancel_event: threading.Event | None,
+) -> None:
+    for future in concurrent.futures.as_completed(futures):
+        _check_cancelled(cancel_event)
+        try:
+            result = future.result()
+            if result:
+                results.append(result)
+        except Exception:
+            pass
 
 
 def run_scan_job(session: Session, job_id: int, generate_thumbnails: bool = False) -> None:
