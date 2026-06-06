@@ -2886,6 +2886,18 @@ select:focus {
   gap: 12px;
 }
 
+.admin-panel .library-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.admin-panel .library-header .search-input {
+  width: 220px;
+}
+
 .panel-header-actions {
   flex-wrap: wrap;
   justify-content: flex-end;
@@ -3042,8 +3054,9 @@ select:focus {
 
 .library-form {
   display: grid;
-  grid-template-columns: minmax(140px, 0.5fr) minmax(220px, 1fr) auto;
+  grid-template-columns: minmax(140px, 0.4fr) minmax(200px, 1fr) auto auto;
   gap: 10px;
+  align-items: center;
 }
 
 .checkbox-label {
@@ -3285,6 +3298,10 @@ select:focus {
   flex-wrap: wrap;
   align-items: center;
   gap: 10px;
+}
+
+.toolbar-row .search-input {
+  width: 240px;
 }
 
 .search-input {

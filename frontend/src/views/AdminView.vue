@@ -54,15 +54,15 @@
 
     <section class="admin-grid" :class="{ working: isWorking }">
       <article class="admin-panel wide-panel">
-        <header>
-          <div>
+        <header class="library-header">
+          <div class="library-header-title">
             <h2>{{ t('admin.librariesTitle') }}</h2>
             <p class="panel-note">{{ t('admin.librariesNote') }}</p>
           </div>
-          <button class="secondary-button" type="button" @click="showDirectoryPicker = true">
-            <FolderSearch :size="17" />
-            {{ t('admin.browseServer') }}
-          </button>
+          <label v-if="libraries.length" class="search-input">
+            <Search :size="16" />
+            <input v-model="librarySearch" :placeholder="t('admin.searchLibraries')" />
+          </label>
         </header>
         <form class="library-form" @submit.prevent="createLibrary">
           <input v-model="libraryName" :placeholder="t('admin.libraryName')" required />
@@ -86,12 +86,6 @@
           <GalleryHorizontal :size="24" />
           <strong>{{ t('admin.noLibrariesYet') }}</strong>
           <span>{{ t('admin.noLibrariesHint') }}</span>
-        </div>
-        <div v-else class="toolbar-row">
-          <label class="search-input">
-            <Search :size="16" />
-            <input v-model="librarySearch" :placeholder="t('admin.searchLibraries')" />
-          </label>
         </div>
         <div v-if="libraries.length && !filteredLibraries.length" class="panel-empty">
           <GalleryHorizontal :size="24" />
