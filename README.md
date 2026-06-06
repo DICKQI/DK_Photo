@@ -2,31 +2,67 @@
 
 DK Photo 是一个自托管的私有家庭相册中心，基于 Vue 3 和 FastAPI 构建。它以只读方式索引配置的照片文件夹，将元数据和缩略图保存在应用数据目录中，并以文件夹视图为核心呈现照片库，操作体验类似群晖 Synology Photos。
 
+## 技术栈
+
+### 前端
+
+![Vue.js](https://img.shields.io/badge/Vue.js-3.5-4FC08D?logo=vuedotjs&logoColor=white&style=flat-square)
+![TypeScript](https://img.shields.io/badge/TypeScript-5.7-3178C6?logo=typescript&logoColor=white&style=flat-square)
+![Vite](https://img.shields.io/badge/Vite-6.0-646CFF?logo=vite&logoColor=white&style=flat-square)
+![Vue Router](https://img.shields.io/badge/Vue_Router-4.5-4FC08D?logo=vuedotjs&logoColor=white&style=flat-square)
+![Lucide](https://img.shields.io/badge/Lucide-0.468-F56565?logo=lucide&logoColor=white&style=flat-square)
+![Vitest](https://img.shields.io/badge/Vitest-2.1-6E9F18?logo=vitest&logoColor=white&style=flat-square)
+![pnpm](https://img.shields.io/badge/pnpm-9.15-F69220?logo=pnpm&logoColor=white&style=flat-square)
+![Nginx](https://img.shields.io/badge/Nginx-1.27-009639?logo=nginx&logoColor=white&style=flat-square)
+
+### 后端
+
+![FastAPI](https://img.shields.io/badge/FastAPI-0.115-009688?logo=fastapi&logoColor=white&style=flat-square)
+![Uvicorn](https://img.shields.io/badge/Uvicorn-0.34-4051B5?logo=uvicorn&logoColor=white&style=flat-square)
+![SQLModel](https://img.shields.io/badge/SQLModel-0.0.22-0056D2?logo=sqlalchemy&logoColor=white&style=flat-square)
+![SQLite](https://img.shields.io/badge/SQLite-3-003B57?logo=sqlite&logoColor=white&style=flat-square)
+![JWT](https://img.shields.io/badge/JWT-PyJWT_2.10-000000?logo=jsonwebtokens&logoColor=white&style=flat-square)
+![Passlib](https://img.shields.io/badge/Passlib-1.7-8B8B8B?logo=python&logoColor=white&style=flat-square)
+![Pillow](https://img.shields.io/badge/Pillow-11.1-107C10?logo=pillow&logoColor=white&style=flat-square)
+![ExifRead](https://img.shields.io/badge/ExifRead-3.0-FF6F00?logo=exifread&logoColor=white&style=flat-square)
+![Watchdog](https://img.shields.io/badge/Watchdog-6.0-00A98F?logo=watchdog&logoColor=white&style=flat-square)
+![pytest](https://img.shields.io/badge/pytest-8.3-0A9EDC?logo=pytest&logoColor=white&style=flat-square)
+
+### 部署
+
+![Docker](https://img.shields.io/badge/Docker-27-2496ED?logo=docker&logoColor=white&style=flat-square)
+![Docker Compose](https://img.shields.io/badge/Docker_Compose-2-2496ED?logo=docker&logoColor=white&style=flat-square)
+![Bash](https://img.shields.io/badge/Bash-deploy-4EAA25?logo=gnubash&logoColor=white&style=flat-square)
+
 ## 功能特性
 
 - **文件夹优先浏览**：支持多级嵌套文件夹，响应式照片网格布局，面包屑导航。
-- **只读索引**：支持 JPEG、PNG、WebP、GIF 图片及 MP4、MOV、WebM、AVI、MKV 视频，不修改原始文件。
+- **只读索引**：支持 JPEG、PNG、WebP、GIF 图片及 MP4、MOV、WebM、AVI、MKV、M4V 视频，不修改原始文件。
 - **SQLite 元数据库**：使用 SQLModel ORM 管理索引数据，Pillow 生成 WebP 缩略图（320px / 720px / 1440px 三档）。
 - **EXIF 信息提取**：自动提取相机型号、镜头、ISO、光圈、快门、焦距、GPS 坐标等元数据。
 - **实时文件监控**：基于 watchdog 监测文件系统变化，自动触发增量扫描。
-- **手动扫描任务**：管理员可随时触发指定图库的扫描任务，查看扫描状态和历史。
+- **手动扫描任务**：管理员可随时触发指定图库的扫描任务，查看实时进度和历史记录，支持取消进行中的任务。
+- **缩略图管理**：管理员可查看缩略图存储统计，清理孤立缩略图文件。
 - **内建用户系统**：管理员 (admin) / 成员 (member) 两种角色，支持多用户。
 - **图库权限管理**：可为每个成员单独分配图库的查看和分享权限，管理员可访问所有图库。
-- **完整用户管理**：创建/启用/禁用用户、重置密码、修改角色和信息。
+- **完整用户管理**：创建/启用/禁用/删除用户、重置密码、修改角色和信息，删除用户时自动清理其个人数据。
 - **文件系统浏览器**：管理员可在页面上浏览服务器目录（支持 Windows 盘符和 Linux 挂载点），选择新增图库路径。
-- **私密分享链接**：支持分享单张照片、整个文件夹或多选照片，可设置过期时间（1~365 天或永不过期），可随时撤销。
+- **服务器设置**：管理员可配置缩略图生成并发数等后端参数。
+- **私密分享链接**：支持分享单张照片、整个文件夹或多选照片，可设置过期时间（1~365 天或永不过期）、密码保护，可随时撤销。
 - **批量操作**：进入选择模式后可多选照片，支持批量添加/移除标签、批量收藏、批量下载 ZIP、批量分享、批量加入/移出相册。
 - **用户相册**：创建、编辑、删除个人相册，添加/移除照片，设置封面。
-- **智能浏览视图**：全部照片、最近添加、视频、地点、收藏、按标签/评分/相机/镜头筛选。
-- **照片查看器**：全屏灯箱，支持键盘前后翻页、缩放、旋转、幻灯片放映、EXIF 信息面板。
+- **智能浏览视图**：全部照片、最近添加、视频、地点、收藏，按标签/评分/相机/镜头/媒体类型筛选，支持排序切换（日期/名称/大小）。
+- **全文搜索**：跨字段搜索文件名、路径、相机型号、镜头、标签、描述等所有文本元数据。
+- **照片查看器**：全屏灯箱，支持键盘前后翻页、缩放、旋转、幻灯片放映、EXIF 信息面板，内置视频播放器，移动端支持手势滑动。
 - **个人元数据**：支持为照片添加标签、描述、评分（1-5 星）、收藏，每个用户独立维护。
 - **标签管理**：支持标签搜索、重命名、删除，自动汇总各标签下的照片数量。
 - **评分筛选**：按评分筛选照片，自动累计（如 4 星显示所有 4 星及以上的照片）。
 - **相机/镜头筛选**：自动从 EXIF 中汇总相机和镜头型号，按数量排序，支持点击筛选。
 - **地点聚类**：将 GPS 坐标精确到小数点后两位进行聚类，展示各地点的照片数量和最新封面。
-- **右键快捷操作**：在文件夹上右键可更改封面或重命名文件夹。
+- **右键快捷操作**：管理员可在文件夹上右键更改封面或重命名文件夹。
 - **暗色/亮色主题**：支持一键切换，自动跟随系统偏好。
 - **中英文双语界面**：支持简体中文和英文切换，覆盖全部 UI 文本。
+- **移动端适配**：全界面响应式设计，移动端提供专用底部导航栏、滑动手势操作和独立布局。
 - **Docker Compose 部署**：前端 Nginx 静态托管 + 后端 Uvicorn，开箱即用。
 
 ## 快速开始
@@ -185,12 +221,14 @@ Vite 开发服务器会将 `/api` 请求代理到 `http://localhost:8000`。
 | | `GET` | `/api/public/shares/{token}/download` | 无 | 下载分享 ZIP |
 | | `GET` | `/api/public/shares/{token}/assets/{id}/original` | 无 | 从分享下载原图 |
 | | `GET` | `/api/public/shares/{token}/assets/{id}/thumbnail` | 无 | 从分享获取缩略图 |
+| | `POST` | `/api/public/shares/{token}/verify` | 无 | 验证分享密码 |
 | 管理 | `GET` | `/api/admin/libraries` | 管理员 | 列出图库 |
 | | `POST` | `/api/admin/libraries` | 管理员 | 创建图库 |
 | | `PATCH` | `/api/admin/libraries/{id}` | 管理员 | 更新图库名称 |
 | | `DELETE` | `/api/admin/libraries/{id}` | 管理员 | 删除图库及数据 |
 | | `POST` | `/api/admin/libraries/{id}/scan` | 管理员 | 触发扫描 |
 | | `GET` | `/api/admin/jobs` | 管理员 | 查看扫描任务（最近40个） |
+| | `POST` | `/api/admin/jobs/{job_id}/cancel` | 管理员 | 取消扫描任务 |
 | | `GET` | `/api/admin/users` | 管理员 | 列出用户 |
 | | `GET` | `/api/admin/users/{id}` | 管理员 | 获取用户详情 |
 | | `POST` | `/api/admin/users` | 管理员 | 创建用户 |
@@ -198,6 +236,7 @@ Vite 开发服务器会将 `/api` 请求代理到 `http://localhost:8000`。
 | | `POST` | `/api/admin/users/{id}/password` | 管理员 | 重置密码 |
 | | `POST` | `/api/admin/users/{id}/disable` | 管理员 | 禁用用户 |
 | | `POST` | `/api/admin/users/{id}/enable` | 管理员 | 启用用户 |
+| | `DELETE` | `/api/admin/users/{id}` | 管理员 | 删除用户 |
 | | `GET` | `/api/admin/users/{id}/permissions` | 管理员 | 查看用户图库权限 |
 | | `PUT` | `/api/admin/users/{id}/permissions` | 管理员 | 更新用户图库权限 |
 | | `GET` | `/api/admin/shares` | 管理员 | 列出所有分享链接 |
@@ -205,24 +244,13 @@ Vite 开发服务器会将 `/api` 请求代理到 `http://localhost:8000`。
 | | `DELETE` | `/api/admin/shares/{id}` | 管理员 | 撤销任意分享链接 |
 | | `GET` | `/api/admin/filesystem/roots` | 管理员 | 列出文件系统根目录 |
 | | `GET` | `/api/admin/filesystem/children` | 管理员 | 浏览子目录 |
+| | `GET` | `/api/admin/thumbnail-stats` | 管理员 | 缩略图存储统计 |
+| | `POST` | `/api/admin/maintenance/cleanup-thumbnails` | 管理员 | 清理孤立缩略图 |
+| | `GET` | `/api/admin/settings` | 管理员 | 获取服务器设置 |
+| | `PUT` | `/api/admin/settings` | 管理员 | 更新服务器设置 |
 | 健康 | `GET` | `/api/health` | 无 | 健康检查 |
 
 完整的请求/响应格式和参数说明请参阅 [api.md](./api.md)。
-
-## 技术栈
-
-| 层级 | 技术 |
-| --- | --- |
-| 前端框架 | Vue 3.5 + TypeScript + Vite |
-| 前端路由 | vue-router 4 |
-| 前端图标 | lucide-vue-next |
-| 后端框架 | FastAPI 0.115 |
-| ORM | SQLModel 0.0.22 (SQLAlchemy + Pydantic) |
-| 数据库 | SQLite |
-| 认证 | JWT (PyJWT) + bcrypt (passlib) |
-| 图像处理 | Pillow 11.1 |
-| 文件监控 | watchdog 6.0 |
-| 部署 | Docker Compose (Nginx + Uvicorn) |
 
 ## 项目结构
 
