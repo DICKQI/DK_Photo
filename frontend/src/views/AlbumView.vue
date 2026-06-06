@@ -2421,7 +2421,29 @@ const visibleMediaCount = computed(() =>
 );
 const albumOverviewMediaCount = computed(() => filteredPhotoAlbums.value.reduce((count, album) => count + album.asset_count, 0));
 const hasVisibleContent = computed(() => (placeOverviewActive.value ? displayedPlaceClusters.value.length > 0 : displayAssets.value.length > 0));
-const canLoadMoreAssets = computed(() => assets.value.length >= assetsPageSize && !loadingMore.value && !currentAlbum.value && !albumOverviewView.value);
+const pagedAssetsViewActive = computed(() =>
+  Boolean(
+    currentFolder.value ||
+      favoritesView.value ||
+      allPhotosView.value ||
+      recentView.value ||
+      videosView.value ||
+      currentPlace.value ||
+      currentTag.value ||
+      currentRating.value ||
+      currentCamera.value ||
+      currentLens.value ||
+      globalSearchActive.value,
+  ),
+);
+const canLoadMoreAssets = computed(() =>
+  pagedAssetsViewActive.value &&
+  assets.value.length >= assetsPageSize &&
+  !loading.value &&
+  !loadingMore.value &&
+  !currentAlbum.value &&
+  !albumOverviewView.value,
+);
 const sortDirectionTitle = computed(() => (sortDirection.value === 'asc' ? t('common.ascendingOrder') : t('common.descendingOrder')));
 const activeMediaFilter = computed<MediaFilter>(() => (videosView.value ? 'video' : mediaFilter.value));
 const effectiveRatingFilter = computed(() => Math.max(currentRating.value ?? 0, ratingFilter.value));
@@ -2682,7 +2704,7 @@ onMounted(async () => {
 
   loadMoreObserver = new IntersectionObserver(
     (entries) => {
-      if (entries[0]?.isIntersecting) {
+      if (entries[0]?.isIntersecting && canLoadMoreAssets.value) {
         loadMoreAssets();
       }
     },
@@ -2718,10 +2740,10 @@ async function loadRoot() {
   favoriteFilter.value = false;
   includeSubfolders.value = false;
   lastSelectedAssetIndex.value = null;
+  assets.value = [];
   try {
     childFolders.value = await api.folders(null);
     rootFolders.value = childFolders.value;
-    assets.value = [];
   } catch (err) {
     error.value = err instanceof Error ? err.message : t('album.unableLoadLibraries');
   } finally {
@@ -2929,7 +2951,7 @@ async function loadAssets({ showSearchLoading = false }: { showSearchLoading?: b
 }
 
 async function loadMoreAssets() {
-  if (loadingMore.value || currentAlbum.value) return;
+  if (!canLoadMoreAssets.value) return;
   const folderId = currentFolder.value ? currentFolder.value.id : null;
   const query = searchQuery.value;
   const onlyFavorites = favoritesView.value || favoriteFilter.value;
