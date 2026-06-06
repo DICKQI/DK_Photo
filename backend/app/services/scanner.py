@@ -7,10 +7,16 @@ from fractions import Fraction
 from pathlib import Path
 from typing import Any
 
-from PIL import ExifTags, Image, ImageOps, UnidentifiedImageError
+from PIL import ExifTags, Image, UnidentifiedImageError
 from sqlalchemy import delete as sa_delete
 from sqlalchemy import func
 from sqlmodel import Session, select
+
+try:
+    import exifread as _exifread_lib
+    _HAS_EXIFREAD = True
+except ImportError:
+    _HAS_EXIFREAD = False
 
 from app.models import Asset, Folder, LibraryRoot, PhotoAlbum, PhotoAlbumAsset, ScanJob, Thumbnail, utc_now
 from app.services.paths import is_docker_photos_root
@@ -88,15 +94,197 @@ GPS_TAGS = {value: key for key, value in ExifTags.GPSTAGS.items()}
 
 def get_image_metadata(path: Path) -> dict[str, Any]:
     metadata = empty_asset_metadata()
+    exif_data: dict[str, Any] = {}
+    orientation: int | None = None
+
+    if _HAS_EXIFREAD:
+        try:
+            with open(path, "rb") as fh:
+                tags = _exifread_lib.process_file(fh, details=False)
+            if tags:
+                exif_data = _parse_exifread_tags(tags)
+                orientation = exif_data.pop("_orientation", None)
+        except Exception:
+            pass
+
     try:
         with Image.open(path) as image:
-            exif = image.getexif()
-            transposed = ImageOps.exif_transpose(image)
-            metadata["width"], metadata["height"] = transposed.size
-            metadata.update(extract_exif_metadata(exif))
+            raw_width, raw_height = image.size
+
+            if not exif_data:
+                pillow_exif = image.getexif()
+                if pillow_exif:
+                    exif_data = extract_exif_metadata(pillow_exif)
+                    if orientation is None:
+                        orientation = _pillow_orientation(pillow_exif)
+
+            if orientation in (5, 6, 7, 8):
+                metadata["width"], metadata["height"] = raw_height, raw_width
+            else:
+                metadata["width"], metadata["height"] = raw_width, raw_height
+
     except (OSError, UnidentifiedImageError):
-        pass
+        return metadata
+
+    metadata.update(exif_data)
     return metadata
+
+
+def _pillow_orientation(exif: Image.Exif) -> int | None:
+    tag_id = EXIF_TAGS.get("Orientation")
+    if tag_id is None:
+        return None
+    value = exif.get(tag_id)
+    return parse_exif_int(value)
+
+
+def _parse_exifread_tags(tags: dict) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+
+    def _text(*keys: str) -> str | None:
+        for key in keys:
+            v = _exifread_text(tags, key)
+            if v:
+                return v
+        return None
+
+    def _number(*keys: str) -> int | None:
+        for key in keys:
+            v = _exifread_number(tags, key)
+            if v is not None:
+                return v
+        return None
+
+    def _ratio(*keys: str) -> float | None:
+        for key in keys:
+            v = _exifread_ratio(tags, key)
+            if v is not None:
+                return v
+        return None
+
+    make = _text("Image Make")
+    if make:
+        result["camera_make"] = make
+
+    model = _text("Image Model")
+    if model:
+        result["camera_model"] = model
+
+    lens = _text("EXIF LensModel", "Image LensModel")
+    if lens:
+        result["lens_model"] = lens
+
+    dt_text = _text("EXIF DateTimeOriginal", "Image DateTimeOriginal", "Image DateTime")
+    if dt_text:
+        captured = parse_exif_datetime(dt_text)
+        if captured:
+            result["captured_at"] = captured
+
+    iso_val = _number("EXIF ISOSpeedRatings", "Image ISOSpeedRatings", "EXIF PhotographicSensitivity")
+    if iso_val is not None:
+        iso = parse_exif_int(iso_val)
+        if iso is not None:
+            result["iso"] = iso
+
+    fnumber = _ratio("EXIF FNumber", "Image FNumber")
+    if fnumber is not None:
+        result["aperture"] = format_aperture(fnumber)
+
+    exposure = _ratio("EXIF ExposureTime", "Image ExposureTime")
+    if exposure is not None:
+        result["exposure_time"] = format_exposure_time(exposure)
+
+    focal = _ratio("EXIF FocalLength", "Image FocalLength")
+    if focal is not None:
+        result["focal_length"] = format_focal_length(focal)
+
+    lat, lon = _exifread_gps(tags)
+    if lat is not None:
+        result["latitude"] = lat
+    if lon is not None:
+        result["longitude"] = lon
+
+    orientation = _number("Image Orientation")
+    if orientation is not None:
+        result["_orientation"] = parse_exif_int(orientation)
+
+    return result
+
+
+def _exifread_text(tags: dict, key: str) -> str | None:
+    tag = tags.get(key)
+    if tag is None:
+        return None
+    return clean_exif_text(str(tag))
+
+
+def _exifread_number(tags: dict, key: str) -> int | None:
+    tag = tags.get(key)
+    if tag is None:
+        return None
+    try:
+        values = tag.values
+        if values and len(values) > 0:
+            return int(values[0])
+    except (TypeError, ValueError):
+        pass
+    return None
+
+
+def _exifread_ratio(tags: dict, key: str) -> float | None:
+    tag = tags.get(key)
+    if tag is None:
+        return None
+    try:
+        values = tag.values
+        if values and len(values) > 0:
+            item = values[0]
+            if hasattr(item, "num") and hasattr(item, "den"):
+                return float(Fraction(item.num, item.den))  # type: ignore[arg-type]
+            return float(item)
+    except (TypeError, ValueError, ZeroDivisionError):
+        pass
+    return None
+
+
+def _exifread_gps(tags: dict) -> tuple[float | None, float | None]:
+    lat_ref_tag = tags.get("GPS GPSLatitudeRef")
+    lat_tag = tags.get("GPS GPSLatitude")
+    lon_ref_tag = tags.get("GPS GPSLongitudeRef")
+    lon_tag = tags.get("GPS GPSLongitude")
+
+    latitude = _exifread_gps_coord(lat_tag, str(lat_ref_tag) if lat_ref_tag else "")
+    longitude = _exifread_gps_coord(lon_tag, str(lon_ref_tag) if lon_ref_tag else "")
+    return latitude, longitude
+
+
+def _exifread_gps_coord(
+    coord_tag: object | None,
+    ref: str,
+) -> float | None:
+    if coord_tag is None:
+        return None
+    try:
+        values = coord_tag.values  # type: ignore[union-attr]
+        if not values or len(values) < 3:
+            return None
+
+        def _ratio_to_float(item: Any) -> float | None:
+            if hasattr(item, "num") and hasattr(item, "den"):
+                return float(Fraction(item.num, item.den))  # type: ignore[arg-type]
+            return float(item)
+
+        degrees = _ratio_to_float(values[0])
+        minutes = _ratio_to_float(values[1])
+        seconds = _ratio_to_float(values[2])
+        if degrees is None or minutes is None or seconds is None:
+            return None
+        coord = degrees + minutes / 60 + seconds / 3600
+        if ref.strip().upper() in {"S", "W"}:
+            coord *= -1
+        return round(coord, 7)
+    except Exception:
+        return None
 
 
 def empty_asset_metadata() -> dict[str, Any]:
@@ -320,7 +508,6 @@ def upsert_asset(session: Session, library: LibraryRoot, folder: Folder, media_p
             **metadata,
         )
         session.add(asset)
-    session.flush()
     return asset
 
 

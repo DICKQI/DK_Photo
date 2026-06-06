@@ -58,6 +58,7 @@ class Asset(SQLModel, table=True):
     __table_args__ = (
         Index("ix_asset_library_folder_mime", "library_id", "folder_id", "mime_type"),
         Index("ix_asset_captured_at", "captured_at"),
+        Index("ix_asset_library_path", "library_id", "path"),
     )
 
     id: Optional[int] = Field(default=None, primary_key=True)

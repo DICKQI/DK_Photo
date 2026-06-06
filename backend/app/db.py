@@ -23,6 +23,9 @@ def configure_sqlite_connection(dbapi_connection, _connection_record) -> None:
         cursor.execute("PRAGMA busy_timeout=30000")
         cursor.execute("PRAGMA journal_mode=WAL")
         cursor.execute("PRAGMA synchronous=NORMAL")
+        cursor.execute("PRAGMA cache_size=-65536")
+        cursor.execute("PRAGMA mmap_size=268435456")
+        cursor.execute("PRAGMA temp_store=MEMORY")
     finally:
         cursor.close()
 
@@ -84,6 +87,10 @@ def run_lightweight_migrations() -> None:
         for column, statement in scanjob_migrations.items():
             if column not in scanjob_columns:
                 connection.execute(text(statement))
+    asset_indexes = {index["name"] for index in inspector.get_indexes("asset")} if inspector.has_table("asset") else set()
+    if "ix_asset_library_path" not in asset_indexes:
+        with engine.begin() as connection:
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_asset_library_path ON asset(library_id, path)"))
 
 
 def get_session() -> Generator[Session, None, None]:

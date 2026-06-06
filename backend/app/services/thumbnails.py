@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import concurrent.futures
 import hashlib
+import os
 import threading
 from pathlib import Path
 
@@ -20,7 +21,7 @@ THUMBNAIL_SIZES: dict[str, tuple[int, int]] = {
     "large": (1440, 1440),
 }
 
-DEFAULT_THUMB_WORKERS = 4
+DEFAULT_THUMB_WORKERS = max(2, (os.cpu_count() or 4) // 2)
 
 
 def thumbnail_cache_path(asset: Asset, size: str) -> Path:
@@ -67,7 +68,7 @@ def ensure_thumbnail(session: Session, asset: Asset, size: str) -> Path:
         image.thumbnail(max_size, Image.Resampling.LANCZOS)
         if image.mode not in {"RGB", "RGBA"}:
             image = image.convert("RGB")
-        image.save(output_path, "WEBP", quality=82, method=4)
+        image.save(output_path, "WEBP", quality=82, method=3)
         width, height = image.size
 
     _save_thumbnail_record(session, asset_id, size, output_path, width, height, existing_id)
@@ -129,7 +130,7 @@ def write_video_placeholder(output_path: Path, max_size: tuple[int, int]) -> tup
         width=max(2, triangle_size // 18),
     )
     draw.polygon(points, fill=accent)
-    image.save(output_path, "WEBP", quality=82, method=4)
+    image.save(output_path, "WEBP", quality=82, method=3)
     return image.size
 
 
@@ -144,7 +145,7 @@ def _generate_thumbnail_file(
             image.thumbnail(max_size, Image.Resampling.LANCZOS)
             if image.mode not in {"RGB", "RGBA"}:
                 image = image.convert("RGB")
-            image.save(output_path, "WEBP", quality=82, method=4)
+            image.save(output_path, "WEBP", quality=82, method=3)
             return image.size
     except Exception:
         try:
