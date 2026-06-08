@@ -641,7 +641,7 @@ def get_thumbnail_stats(session: SessionDep, _: AdminUser) -> ThumbnailStats:
 
     null_count = session.exec(
         select(func.count(Thumbnail.id)).where(Thumbnail.file_size == None)  # type: ignore[arg-type]
-    ).one()[0]
+    ).one()
 
     if null_count > 0:
         total_size_bytes = 0
@@ -655,7 +655,7 @@ def get_thumbnail_stats(session: SessionDep, _: AdminUser) -> ThumbnailStats:
     else:
         total_size_bytes = session.exec(
             select(func.coalesce(func.sum(Thumbnail.file_size), 0))  # type: ignore[arg-type]
-        ).one()[0]
+        ).one()
 
     return ThumbnailStats(
         total_count=sum(count_map.values()),
