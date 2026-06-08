@@ -4,9 +4,4 @@
       <component :is="Component" />
     </Transition>
   </RouterView>
-  <GlobalScanIndicator />
 </template>
-
-<script setup lang="ts">
-import GlobalScanIndicator from './components/GlobalScanIndicator.vue';
-</script>

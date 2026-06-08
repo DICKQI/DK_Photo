@@ -359,7 +359,7 @@
           <button class="icon-button desktop-only-action" :title="t('common.signOut')" @click="logout">
             <LogOut :size="18" />
           </button>
-          <span id="scan-indicator-slot"></span>
+          <GlobalScanIndicator />
         </div>
       </header>
 
@@ -1894,6 +1894,7 @@ import { useTheme } from '../composables/useTheme';
 import { api, thumbnailUrl } from '../services/api';
 import type { Asset, AssetCamera, AssetLens, AssetPlace, AssetRating, AssetTag, Folder as FolderType, PhotoAlbum, ShareLink, User } from '../types';
 import AdminView from './AdminView.vue';
+import GlobalScanIndicator from '../components/GlobalScanIndicator.vue';
 
 type ThumbSize = 'small' | 'medium' | 'large';
 type SortMode = 'date' | 'name' | 'size';

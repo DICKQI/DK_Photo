@@ -24,7 +24,7 @@
           <ExternalLink :size="18" />
           GitHub
         </a>
-        <span id="scan-indicator-slot"></span>
+        <GlobalScanIndicator />
       </div>
     </header>
 
@@ -727,6 +727,7 @@ import ManagementNav from '../components/ManagementNav.vue';
 import { useLocale } from '../composables/useLocale';
 import { useTheme } from '../composables/useTheme';
 import { api } from '../services/api';
+import GlobalScanIndicator from '../components/GlobalScanIndicator.vue';
 import type { Library, LibraryPermission, ScanJob, ServerSettings, ShareLink, ThumbnailStats, User } from '../types';
 
 const libraries = ref<Library[]>([]);
