@@ -1,11 +1,14 @@
 <template>
-  <main class="admin-shell">
-    <header class="admin-header">
-      <div>
-        <p class="eyebrow">{{ t('admin.eyebrow') }}</p>
-        <h1>{{ t('admin.title') }}</h1>
-      </div>
-      <div class="admin-actions">
+  <section class="admin-embedded-view">
+    <header class="topbar admin-topbar">
+      <nav class="breadcrumbs">
+        <RouterLink to="/">{{ t('common.photos') }}</RouterLink>
+        <ChevronRight :size="15" />
+        <span>{{ t('common.management') }}</span>
+        <ChevronRight :size="15" />
+        <span>{{ activeModuleTitle }}</span>
+      </nav>
+      <div class="admin-actions topbar-actions">
         <button class="secondary-button" @click="toggleTheme">
           <Sun v-if="isDark" :size="18" />
           <Moon v-else :size="18" />
@@ -21,43 +24,66 @@
           <ExternalLink :size="18" />
           GitHub
         </a>
-        <RouterLink class="secondary-button" to="/">
-          <Images :size="18" />
-          {{ t('common.backToPhotos') }}
-        </RouterLink>
       </div>
     </header>
 
-    <section class="admin-summary-grid">
-      <article class="summary-tile">
-        <FolderSearch :size="20" />
-        <span>{{ t('admin.summaryLibraries') }}</span>
-        <strong>{{ libraries.length }}</strong>
-      </article>
-      <article class="summary-tile">
-        <UserPlus :size="20" />
-        <span>{{ t('admin.summaryActiveUsers') }}</span>
-        <strong>{{ activeUserCount }}</strong>
-      </article>
-      <article class="summary-tile">
-        <ScanLine :size="20" />
-        <span>{{ t('admin.summaryRunningScans') }}</span>
-        <strong>{{ runningJobCount }}</strong>
-      </article>
-      <article class="summary-tile">
-        <ShieldCheck :size="20" />
-        <span>{{ t('admin.summaryOpenShares') }}</span>
-        <strong>{{ activeShareCount }}</strong>
-      </article>
-      <article class="summary-tile">
-        <HardDrive :size="20" />
-        <span>{{ t('admin.thumbnailStorage') }}</span>
-        <strong>{{ formatBytes(thumbnailStats.total_size_bytes) }}</strong>
-      </article>
-    </section>
+    <ManagementNav class="admin-mobile-module-nav" :show-heading="false" />
 
     <section class="admin-grid" :class="{ working: isWorking }">
-      <article class="admin-panel wide-panel">
+      <section v-if="activeModule === 'tools'" class="admin-summary-grid admin-module-summary">
+        <article class="summary-tile">
+          <FolderSearch :size="20" />
+          <span>{{ t('admin.summaryLibraries') }}</span>
+          <strong>{{ libraries.length }}</strong>
+        </article>
+        <article class="summary-tile">
+          <UserPlus :size="20" />
+          <span>{{ t('admin.summaryActiveUsers') }}</span>
+          <strong>{{ activeUserCount }}</strong>
+        </article>
+        <article class="summary-tile">
+          <ScanLine :size="20" />
+          <span>{{ t('admin.summaryRunningScans') }}</span>
+          <strong>{{ runningJobCount }}</strong>
+        </article>
+        <article class="summary-tile">
+          <ShieldCheck :size="20" />
+          <span>{{ t('admin.summaryOpenShares') }}</span>
+          <strong>{{ activeShareCount }}</strong>
+        </article>
+        <article class="summary-tile">
+          <HardDrive :size="20" />
+          <span>{{ t('admin.thumbnailStorage') }}</span>
+          <strong>{{ formatBytes(thumbnailStats.total_size_bytes) }}</strong>
+        </article>
+      </section>
+
+      <article v-if="activeModule === 'tools'" class="admin-panel wide-panel thumbnail-maintenance-panel">
+        <header>
+          <div>
+            <h2>{{ t('admin.thumbnailMaintenance') }}</h2>
+            <p class="panel-note">{{ t('admin.thumbnailMaintenanceNote') }}</p>
+          </div>
+          <button class="danger-button" :disabled="isBusy(thumbnailCleanupKey)" @click="cleanupThumbnails">
+            <LoaderCircle v-if="isBusy(thumbnailCleanupKey)" class="spin" :size="17" />
+            <Trash2 v-else :size="17" />
+            {{ isBusy(thumbnailCleanupKey) ? t('admin.cleaningThumbnails') : t('admin.cleanupThumbnails') }}
+          </button>
+        </header>
+        <div class="thumbnail-stat-list">
+          <span>
+            <strong>{{ thumbnailStats.total_count.toLocaleString() }}</strong>
+            {{ t('admin.thumbnailFiles') }}
+          </span>
+          <span>
+            <strong>{{ formatBytes(thumbnailStats.total_size_bytes) }}</strong>
+            {{ t('admin.thumbnailDiskUsage') }}
+          </span>
+          <span>{{ t('admin.thumbnailSizeBreakdown', { small: thumbnailStats.small_count.toLocaleString(), medium: thumbnailStats.medium_count.toLocaleString(), large: thumbnailStats.large_count.toLocaleString() }) }}</span>
+        </div>
+      </article>
+
+      <article v-if="activeModule === 'libraries'" class="admin-panel wide-panel">
         <header class="library-header">
           <div class="library-header-title">
             <h2>{{ t('admin.librariesTitle') }}</h2>
@@ -158,8 +184,8 @@
         </div>
       </article>
 
-      <div class="admin-grid-row admin-users-settings-grid">
-      <article class="admin-panel users-panel">
+      <div v-if="activeModule === 'users' || activeModule === 'settings'" class="admin-grid-row admin-users-settings-grid single-panel-row">
+      <article v-if="activeModule === 'users'" class="admin-panel users-panel">
           <header>
             <div>
               <h2>{{ t('admin.usersTitle') }}</h2>
@@ -270,7 +296,7 @@
           </div>
       </article>
 
-      <article class="admin-panel settings-panel">
+      <article v-if="activeModule === 'settings'" class="admin-panel settings-panel">
         <header>
           <div>
             <h2>{{ t('admin.settingsTitle') }}</h2>
@@ -323,8 +349,8 @@
       </article>
       </div>
 
-      <div class="admin-grid-row admin-monitor-grid">
-      <article class="admin-panel monitor-panel">
+      <div v-if="activeModule === 'libraries' || activeModule === 'tools'" class="admin-grid-row admin-monitor-grid single-panel-row">
+      <article v-if="activeModule === 'libraries'" class="admin-panel monitor-panel">
         <header>
           <h2>{{ t('admin.scanJobs') }}</h2>
         </header>
@@ -395,7 +421,7 @@
         </template>
       </article>
 
-      <article class="admin-panel monitor-panel">
+      <article v-if="activeModule === 'tools'" class="admin-panel monitor-panel">
         <header>
           <h2>{{ t('admin.shareLinks') }}</h2>
         </header>
@@ -659,23 +685,24 @@
       <CircleCheck v-else :size="17" />
       {{ message }}
     </p>
-  </main>
+  </section>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
+import { useRoute } from 'vue-router';
 import {
   Ban,
   CircleAlert,
   CircleCheck,
   Copy,
+  ChevronRight,
   ExternalLink,
   Eye,
   FolderSearch,
   FolderOpen,
   GalleryHorizontal,
   HardDrive,
-  Images,
   KeyRound,
   LoaderCircle,
   Moon,
@@ -695,12 +722,14 @@ import {
 } from 'lucide-vue-next';
 import DirectoryPicker from '../components/DirectoryPicker.vue';
 import LanguageToggle from '../components/LanguageToggle.vue';
+import ManagementNav from '../components/ManagementNav.vue';
 import { useLocale } from '../composables/useLocale';
 import { useTheme } from '../composables/useTheme';
 import { api } from '../services/api';
 import type { Library, LibraryPermission, ScanJob, ServerSettings, ShareLink, ThumbnailStats, User } from '../types';
 
 const libraries = ref<Library[]>([]);
+const route = useRoute();
 const { isDark, toggleTheme } = useTheme();
 const { t, formatCount, formatDate, formatDateTime } = useLocale();
 const jobs = ref<ScanJob[]>([]);
@@ -733,6 +762,7 @@ const editingLibraryId = ref<number | null>(null);
 const refreshKey = 'refresh';
 const createLibraryKey = 'library:create';
 const createUserKey = 'user:create';
+const thumbnailCleanupKey = 'thumbnails:cleanup';
 const busyKeys = reactive<Record<string, boolean>>({});
 const showDirectoryPicker = ref(false);
 const showCreateUserModal = ref(false);
@@ -746,6 +776,22 @@ const libraryEditBuffer = reactive<Record<number, string>>({});
 const editBuffer = reactive<Record<number, { email: string; display_name: string; role: 'admin' | 'member' }>>({});
 const permissionBuffer = reactive<Record<number, { can_view: boolean; can_share: boolean }>>({});
 let messageTimer: ReturnType<typeof setTimeout> | null = null;
+
+type AdminModule = 'users' | 'libraries' | 'tools' | 'settings';
+
+const activeModule = computed<AdminModule>(() => {
+  if (route.name === 'admin-users') return 'users';
+  if (route.name === 'admin-tools') return 'tools';
+  if (route.name === 'admin-settings') return 'settings';
+  return 'libraries';
+});
+
+const activeModuleTitle = computed(() => {
+  if (activeModule.value === 'users') return t('admin.navUsers');
+  if (activeModule.value === 'tools') return t('admin.navTools');
+  if (activeModule.value === 'settings') return t('admin.navSettings');
+  return t('admin.navLibraries');
+});
 
 const activeUserCount = computed(() => users.value.filter((user) => user.is_active).length);
 const runningJobCount = computed(() => jobs.value.filter((job) => ['queued', 'running'].includes(job.status)).length);
@@ -1418,6 +1464,19 @@ async function confirmDeleteShare() {
     closeDeleteShare();
   } catch (err) {
     showMessage(errorMessage(err, t('album.unableDeleteShare')), 'error');
+  }
+}
+
+async function cleanupThumbnails() {
+  startBusy(thumbnailCleanupKey);
+  try {
+    const result = await api.cleanupThumbnails();
+    thumbnailStats.value = await api.thumbnailStats();
+    showMessage(t('admin.thumbnailsCleaned', { count: result.deleted_files.toLocaleString(), size: formatBytes(result.freed_bytes) }));
+  } catch (err) {
+    showMessage(errorMessage(err, t('admin.unableCleanupThumbnails')), 'error');
+  } finally {
+    stopBusy(thumbnailCleanupKey);
   }
 }
 

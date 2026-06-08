@@ -717,6 +717,74 @@ select:focus {
   border-top: 1px solid var(--border);
 }
 
+.management-nav {
+  display: grid;
+  gap: 6px;
+}
+
+.management-nav-title {
+  display: block;
+  color: #172033;
+  font-size: 0.82rem;
+  font-weight: 850;
+  padding: 4px 2px 6px;
+}
+
+.management-nav-link {
+  width: 100%;
+  justify-content: flex-start;
+  min-width: 0;
+  text-decoration: none;
+}
+
+.management-nav-link span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.management-nav-link svg {
+  flex: 0 0 auto;
+}
+
+.management-nav-sidebar .management-nav-link {
+  border-color: transparent;
+  background: transparent;
+  color: #34415c;
+  font-weight: 750;
+}
+
+.management-nav-sidebar .management-nav-link:hover {
+  border-color: transparent;
+  background: var(--panel-subtle);
+  box-shadow: none;
+}
+
+.management-nav-link.active,
+.management-nav-sidebar .management-nav-link.active {
+  border-color: transparent;
+  background: #c8efd9;
+  color: #172033;
+}
+
+.management-nav-sheet {
+  margin-top: 12px;
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+
+.management-nav-sheet .management-nav-title {
+  color: var(--muted);
+  font-size: 0.76rem;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.management-nav-sheet-link {
+  text-decoration: none;
+}
+
 .brand-row {
   display: flex;
   align-items: center;
@@ -1306,11 +1374,13 @@ select:focus {
   color: var(--muted);
 }
 
-.breadcrumbs button {
+.breadcrumbs button,
+.breadcrumbs a {
   border: 0;
   background: transparent;
   color: #25314a;
   padding: 6px;
+  text-decoration: none;
 }
 
 .breadcrumbs span {
@@ -2765,6 +2835,39 @@ select:focus {
   padding: 22px clamp(18px, 2.6vw, 40px) 36px;
 }
 
+.admin-app-shell {
+  background: var(--panel-subtle);
+}
+
+.admin-sidebar-scroll {
+  padding-top: 4px;
+}
+
+.admin-content-pane {
+  min-height: 100vh;
+  min-height: 100dvh;
+  background: var(--panel-subtle);
+}
+
+.admin-embedded-view {
+  min-height: 100vh;
+  min-height: 100dvh;
+  background: var(--panel-subtle);
+}
+
+.admin-content-pane .admin-grid,
+.admin-embedded-view .admin-grid {
+  padding: 18px clamp(16px, 2vw, 28px) 36px;
+}
+
+.admin-topbar {
+  min-height: 64px;
+}
+
+.admin-mobile-module-nav {
+  display: none;
+}
+
 .share-shell {
   padding: 28px;
 }
@@ -2868,6 +2971,10 @@ select:focus {
   gap: 16px;
 }
 
+.admin-grid-row.single-panel-row {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .admin-panel {
   display: grid;
   min-width: 0;
@@ -2951,11 +3058,41 @@ select:focus {
   min-height: 0;
 }
 
+.thumbnail-maintenance-panel {
+  align-content: start;
+}
+
+.thumbnail-stat-list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.thumbnail-stat-list span {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-subtle);
+  color: var(--muted);
+  padding: 12px;
+  font-size: 0.9rem;
+}
+
+.thumbnail-stat-list strong {
+  display: block;
+  color: #172033;
+  font-size: 1.12rem;
+}
+
 .admin-users-settings-grid {
   grid-column: 1 / -1;
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(320px, 0.6fr);
   gap: 16px;
+}
+
+.admin-users-settings-grid.single-panel-row {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .settings-form {
@@ -4297,6 +4434,54 @@ select:focus {
     display: none;
   }
 
+  .admin-content-pane .admin-grid,
+  .admin-embedded-view .admin-grid {
+    padding: 12px 12px calc(84px + env(safe-area-inset-bottom));
+  }
+
+  .admin-topbar {
+    display: flex;
+    min-height: auto;
+    align-items: center;
+    padding: 8px 12px;
+  }
+
+  .admin-topbar > .breadcrumbs {
+    grid-column: auto;
+    grid-row: auto;
+    flex: 1 1 auto;
+  }
+
+  .admin-topbar > .topbar-actions {
+    grid-column: auto;
+    grid-row: auto;
+    flex: 0 0 auto;
+    width: auto;
+    overflow-x: visible;
+  }
+
+  .admin-mobile-module-nav {
+    position: sticky;
+    z-index: 3;
+    top: 0;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    border-bottom: 1px solid var(--border);
+    background: rgba(255, 255, 255, 0.92);
+    padding: 10px 12px;
+    backdrop-filter: blur(10px);
+  }
+
+  .admin-mobile-module-nav .management-nav-link {
+    justify-content: center;
+    min-height: 44px;
+  }
+
+  .admin-mobile-module-nav .management-nav-link span {
+    white-space: normal;
+  }
+
   .topbar {
     display: grid;
     min-height: 0;
@@ -4342,6 +4527,7 @@ select:focus {
   }
 
   .topbar > .breadcrumbs button,
+  .topbar > .breadcrumbs a,
   .topbar > .breadcrumbs span {
     min-width: 0;
     overflow: hidden;
@@ -4349,7 +4535,8 @@ select:focus {
     white-space: nowrap;
   }
 
-  .topbar > .breadcrumbs button {
+  .topbar > .breadcrumbs button,
+  .topbar > .breadcrumbs a {
     padding: 4px;
   }
 
@@ -4939,6 +5126,10 @@ select:focus {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .thumbnail-stat-list {
+    grid-template-columns: 1fr;
+  }
+
   .inline-form,
   .library-form,
   .user-card,
@@ -5265,6 +5456,32 @@ select:focus {
   background: rgba(21, 29, 45, 0.98);
 }
 
+:root[data-theme="dark"] .management-nav-title,
+:root[data-theme="dark"] .thumbnail-stat-list strong {
+  color: #e5edf8;
+}
+
+:root[data-theme="dark"] .management-nav-sidebar .management-nav-link {
+  background: transparent;
+  color: #d7deec;
+}
+
+:root[data-theme="dark"] .management-nav-sidebar .management-nav-link:hover {
+  background: rgba(122, 167, 255, 0.1);
+}
+
+:root[data-theme="dark"] .management-nav-link.active,
+:root[data-theme="dark"] .management-nav-sidebar .management-nav-link.active {
+  background: rgba(74, 222, 128, 0.2);
+  color: #dcfce7;
+}
+
+:root[data-theme="dark"] .thumbnail-stat-list span,
+:root[data-theme="dark"] .admin-mobile-module-nav {
+  border-color: var(--border);
+  background: rgba(16, 24, 39, 0.92);
+}
+
 :root[data-theme="dark"] .sidebar-bottom-fixed {
   border-top-color: var(--border);
 }
@@ -5442,6 +5659,7 @@ select:focus {
 }
 
 :root[data-theme="dark"] .breadcrumbs button,
+:root[data-theme="dark"] .breadcrumbs a,
 :root[data-theme="dark"] .breadcrumbs span,
 :root[data-theme="dark"] .tree-item,
 :root[data-theme="dark"] .photo-tile,

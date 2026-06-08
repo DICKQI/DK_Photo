@@ -7,33 +7,33 @@
           <strong>DK Photo</strong>
         </div>
         <div class="sidebar-nav-main">
-          <button class="sidebar-action sidebar-action-primary" :class="{ active: !currentFolder && !favoritesView && !allPhotosView && !recentView && !videosView && !placesView && !currentPlace && !currentTag && !currentRating && !currentCamera && !currentLens && !currentAlbum && !albumOverviewView }" @click="goRoot">
+          <button class="sidebar-action sidebar-action-primary" :class="{ active: !adminWorkspaceActive && !currentFolder && !favoritesView && !allPhotosView && !recentView && !videosView && !placesView && !currentPlace && !currentTag && !currentRating && !currentCamera && !currentLens && !currentAlbum && !albumOverviewView }" @click="goRoot">
             <FolderRoot :size="18" />
             <span class="sidebar-action-label">{{ t('album.allLibraries') }}</span>
           </button>
-          <button class="sidebar-action sidebar-action-primary" :class="{ active: allPhotosView }" @click="openAllPhotosView">
+          <button class="sidebar-action sidebar-action-primary" :class="{ active: !adminWorkspaceActive && allPhotosView }" @click="openAllPhotosView">
             <Images :size="18" />
             <span class="sidebar-action-label">{{ t('album.allPhotos') }}</span>
           </button>
-          <button class="sidebar-action sidebar-action-primary" :class="{ active: albumOverviewView }" @click="openAlbumOverviewView">
+          <button class="sidebar-action sidebar-action-primary" :class="{ active: !adminWorkspaceActive && albumOverviewView }" @click="openAlbumOverviewView">
             <Images :size="18" />
             <span class="sidebar-action-label">{{ t('album.albums') }}</span>
           </button>
         </div>
         <div class="sidebar-nav-secondary" :aria-label="t('album.smartAlbum')">
-          <button class="sidebar-action sidebar-action-compact" :class="{ active: recentView }" @click="openRecentView">
+          <button class="sidebar-action sidebar-action-compact" :class="{ active: !adminWorkspaceActive && recentView }" @click="openRecentView">
             <Clock :size="17" />
             <span class="sidebar-action-label">{{ t('album.recentlyAdded') }}</span>
           </button>
-          <button class="sidebar-action sidebar-action-compact" :class="{ active: videosView }" @click="openVideosView">
+          <button class="sidebar-action sidebar-action-compact" :class="{ active: !adminWorkspaceActive && videosView }" @click="openVideosView">
             <Video :size="17" />
             <span class="sidebar-action-label">{{ t('album.videos') }}</span>
           </button>
-          <button class="sidebar-action sidebar-action-compact" :class="{ active: placesView }" @click="openPlacesView">
+          <button class="sidebar-action sidebar-action-compact" :class="{ active: !adminWorkspaceActive && placesView }" @click="openPlacesView">
             <MapPin :size="17" />
             <span class="sidebar-action-label">{{ t('album.places') }}</span>
           </button>
-          <button class="sidebar-action sidebar-action-compact" :class="{ active: favoritesView }" @click="openFavoritesView">
+          <button class="sidebar-action sidebar-action-compact" :class="{ active: !adminWorkspaceActive && favoritesView }" @click="openFavoritesView">
             <Star :size="17" />
             <span class="sidebar-action-label">{{ t('album.favorites') }}</span>
           </button>
@@ -57,7 +57,7 @@
           v-for="folder in filteredRootFolders"
           :key="folder.id"
           class="tree-item"
-          :class="{ active: currentFolder?.id === folder.id }"
+          :class="{ active: !adminWorkspaceActive && currentFolder?.id === folder.id }"
           @click="openFolder(folder)"
         >
           <Folder :size="17" />
@@ -69,320 +69,16 @@
           <span>{{ t('album.noMatchingLibraries') }}</span>
         </div>
       </div>
-
-      <div class="sidebar-section-header" @click="toggleSection('albums')">
-        <span class="section-header-label">
-          <ChevronDown :size="14" class="collapse-chevron" :class="{ collapsed: collapsedSections['albums'] }" />
-          <span>{{ t('album.albums') }}</span>
-        </span>
-        <div class="sidebar-section-actions" @click.stop>
-          <button type="button" :title="t('album.newAlbum')" @click="openNewAlbumModal">
-            <Plus :size="14" />
-          </button>
-          <button type="button" :title="t('album.refreshAlbums')" @click="loadAlbums">
-            <RefreshCw :size="14" />
-          </button>
-        </div>
-      </div>
-      <Transition name="sidebar-collapse">
-        <div v-show="!collapsedSections['albums']" class="sidebar-collapse-panel">
-          <div class="sidebar-collapse-panel-inner">
-            <div v-if="photoAlbums.length" class="album-filter-row">
-              <label class="library-filter album-filter">
-                <Search :size="16" />
-                <input v-model="albumFilter" :placeholder="t('album.filterAlbums')" />
-                <button v-if="albumFilter" class="search-clear" type="button" :title="t('album.clearAlbumFilter')" @click="albumFilter = ''">
-                  <X :size="14" />
-                </button>
-              </label>
-              <div class="album-sort-controls segmented-control" :aria-label="t('album.sortAlbums')">
-                <button :class="{ active: albumSortMode === 'updated' }" :title="t('album.sortAlbumsByUpdated')" @click="setAlbumSortMode('updated')">
-                  {{ t('common.sortDate') }}
-                </button>
-                <button :class="{ active: albumSortMode === 'name' }" :title="t('album.sortAlbumsByName')" @click="setAlbumSortMode('name')">
-                  {{ t('common.sortName') }}
-                </button>
-                <button :class="{ active: albumSortMode === 'count' }" :title="t('album.sortAlbumsByCount')" @click="setAlbumSortMode('count')">
-                  {{ t('common.sortSize') }}
-                </button>
-                <button :class="{ active: albumSortDirection === 'asc' }" :title="albumSortDirectionTitle" @click="toggleAlbumSortDirection">
-                  <ArrowUpAZ v-if="albumSortDirection === 'asc'" :size="14" />
-                  <ArrowDownAZ v-else :size="14" />
-                </button>
-              </div>
-            </div>
-            <div class="album-list">
-              <div v-if="albumsLoading" class="shares-loading">
-                <LoaderCircle class="spin" :size="18" />
-                <span>{{ t('album.loadingAlbums') }}</span>
-              </div>
-              <div v-else-if="!photoAlbums.length" class="shares-empty">
-                <span>{{ t('album.noAlbums') }}</span>
-                <small>{{ t('album.noAlbumsHint') }}</small>
-              </div>
-              <div v-else-if="!filteredPhotoAlbums.length" class="shares-empty">
-                <span>{{ t('album.noMatchingAlbums') }}</span>
-                <small>{{ t('album.noAlbumsMatch', { query: albumFilter.trim() }) }}</small>
-              </div>
-              <template v-else>
-                <button
-                  v-for="album in filteredPhotoAlbums"
-                  :key="album.id"
-                  class="tree-item album-tree-item"
-                  :class="{ active: currentAlbum?.id === album.id }"
-                  @click="openAlbumView(album)"
-                >
-                  <span class="album-list-cover">
-                    <img v-if="album.cover_asset_id" :src="thumbnailUrl(album.cover_asset_id, 'small')" alt="" loading="lazy" />
-                    <Images v-else :size="17" />
-                  </span>
-                  <span>{{ album.name }}</span>
-                  <small>{{ album.asset_count }}</small>
-                </button>
-              </template>
-            </div>
-          </div>
-        </div>
-      </Transition>
-
-      <div class="sidebar-section-header" @click="toggleSection('cameras')">
-        <span class="section-header-label">
-          <ChevronDown :size="14" class="collapse-chevron" :class="{ collapsed: collapsedSections['cameras'] }" />
-          <span>{{ t('album.cameras') }}</span>
-        </span>
-        <button type="button" :title="t('album.refreshCameras')" @click.stop="loadCameras">
-          <RefreshCw :size="14" />
-        </button>
-      </div>
-      <Transition name="sidebar-collapse">
-        <div v-show="!collapsedSections['cameras']" class="sidebar-collapse-panel">
-          <div class="sidebar-collapse-panel-inner camera-list">
-            <div v-if="camerasLoading" class="shares-loading">
-              <LoaderCircle class="spin" :size="18" />
-              <span>{{ t('album.loadingCameras') }}</span>
-            </div>
-            <div v-else-if="!filteredAssetCameras.length" class="shares-empty">
-              <span>{{ t('album.noCameras') }}</span>
-              <small>{{ t('album.noCamerasHint') }}</small>
-            </div>
-            <template v-else>
-              <button
-                v-for="camera in filteredAssetCameras"
-                :key="camera.camera_key"
-                class="tree-item camera-tree-item"
-                :class="{ active: currentCamera?.camera_key === camera.camera_key }"
-                @click="openCameraView(camera)"
-              >
-                <Camera :size="17" />
-                <span>{{ camera.label }}</span>
-                <small>{{ camera.asset_count }}</small>
-              </button>
-            </template>
-          </div>
-        </div>
-      </Transition>
-
-      <div class="sidebar-section-header" @click="toggleSection('lenses')">
-        <span class="section-header-label">
-          <ChevronDown :size="14" class="collapse-chevron" :class="{ collapsed: collapsedSections['lenses'] }" />
-          <span>{{ t('album.lenses') }}</span>
-        </span>
-        <button type="button" :title="t('album.refreshLenses')" @click.stop="loadLenses">
-          <RefreshCw :size="14" />
-        </button>
-      </div>
-      <Transition name="sidebar-collapse">
-        <div v-show="!collapsedSections['lenses']" class="sidebar-collapse-panel">
-          <div class="sidebar-collapse-panel-inner lens-list">
-            <div v-if="lensesLoading" class="shares-loading">
-              <LoaderCircle class="spin" :size="18" />
-              <span>{{ t('album.loadingLenses') }}</span>
-            </div>
-            <div v-else-if="!filteredAssetLenses.length" class="shares-empty">
-              <span>{{ t('album.noLenses') }}</span>
-              <small>{{ t('album.noLensesHint') }}</small>
-            </div>
-            <template v-else>
-              <button
-                v-for="lens in filteredAssetLenses"
-                :key="lens.lens_key"
-                class="tree-item lens-tree-item"
-                :class="{ active: currentLens?.lens_key === lens.lens_key }"
-                @click="openLensView(lens)"
-              >
-                <Aperture :size="17" />
-                <span>{{ lens.label }}</span>
-                <small>{{ lens.asset_count }}</small>
-              </button>
-            </template>
-          </div>
-        </div>
-      </Transition>
-
-      <div class="sidebar-section-header" @click="toggleSection('ratings')">
-        <span class="section-header-label">
-          <ChevronDown :size="14" class="collapse-chevron" :class="{ collapsed: collapsedSections['ratings'] }" />
-          <span>{{ t('album.ratings') }}</span>
-        </span>
-        <button type="button" :title="t('album.refreshRatings')" @click.stop="loadRatings">
-          <RefreshCw :size="14" />
-        </button>
-      </div>
-      <Transition name="sidebar-collapse">
-        <div v-show="!collapsedSections['ratings']" class="sidebar-collapse-panel">
-          <div class="sidebar-collapse-panel-inner rating-list">
-            <div v-if="ratingsLoading" class="shares-loading">
-              <LoaderCircle class="spin" :size="18" />
-              <span>{{ t('album.loadingRatings') }}</span>
-            </div>
-            <div v-else-if="!filteredAssetRatings.length" class="shares-empty">
-              <span>{{ t('album.noRatings') }}</span>
-              <small>{{ t('album.noRatingsHint') }}</small>
-            </div>
-            <template v-else>
-              <button
-                v-for="rating in filteredAssetRatings"
-                :key="rating.rating"
-                class="tree-item rating-tree-item"
-                :class="{ active: currentRating === rating.rating }"
-                @click="openRatingView(rating.rating)"
-              >
-                <Star :size="17" fill="currentColor" />
-                <span>{{ t('album.ratingAtLeast', { rating: rating.rating }) }}</span>
-                <small>{{ rating.asset_count }}</small>
-              </button>
-            </template>
-          </div>
-        </div>
-      </Transition>
-
-      <div class="sidebar-section-header" @click="toggleSection('tags')">
-        <span class="section-header-label">
-          <ChevronDown :size="14" class="collapse-chevron" :class="{ collapsed: collapsedSections['tags'] }" />
-          <span>{{ t('album.tags') }}</span>
-        </span>
-        <button type="button" :title="t('album.refreshTags')" @click.stop="loadTags">
-          <RefreshCw :size="14" />
-        </button>
-      </div>
-      <Transition name="sidebar-collapse">
-        <div v-show="!collapsedSections['tags']" class="sidebar-collapse-panel">
-          <div class="sidebar-collapse-panel-inner">
-            <label v-if="assetTags.length" class="library-filter tag-filter">
-              <Search :size="16" />
-              <input v-model="tagFilter" :placeholder="t('album.searchTags')" />
-              <button v-if="tagFilter" class="search-clear" type="button" :title="t('common.clearSearch')" @click="tagFilter = ''">
-                <X :size="14" />
-              </button>
-            </label>
-            <div class="tag-list">
-              <div v-if="tagsLoading" class="shares-loading">
-                <LoaderCircle class="spin" :size="18" />
-                <span>{{ t('album.loadingTags') }}</span>
-              </div>
-              <div v-else-if="!assetTags.length" class="shares-empty">
-                <span>{{ t('album.noTags') }}</span>
-                <small>{{ t('album.noTagsHint') }}</small>
-              </div>
-              <div v-else-if="!filteredAssetTags.length" class="shares-empty">
-                <span>{{ t('album.noMatchingTags') }}</span>
-                <small>{{ t('album.noTagsMatch', { query: tagFilter.trim() }) }}</small>
-              </div>
-              <template v-else>
-                <div
-                  v-for="tag in filteredAssetTags"
-                  :key="tag.name"
-                  class="tag-tree-row"
-                  :class="{ active: currentTag === tag.name }"
-                >
-                  <button class="tree-item tag-tree-item" @click="openTagView(tag.name)">
-                    <Tag :size="17" />
-                    <span>{{ tag.name }}</span>
-                    <small>{{ tag.asset_count }}</small>
-                  </button>
-                  <div class="tag-row-actions">
-                    <button type="button" :title="t('album.renameTag')" @click="openRenameTag(tag)">
-                      <Pencil :size="14" />
-                    </button>
-                    <button type="button" :title="t('album.deleteTag')" @click="openDeleteTag(tag)">
-                      <Trash2 :size="14" />
-                    </button>
-                  </div>
-                </div>
-              </template>
-            </div>
-          </div>
-        </div>
-      </Transition>
-
-      <button class="sidebar-action" :class="{ active: showSharesPanel }" @click="toggleSharesPanel">
-        <Share2 :size="18" />
-        {{ t('album.myShareLinks') }}
-      </button>
-      <div v-if="showSharesPanel" class="shares-panel">
-        <div v-if="sharesLoading" class="shares-loading">
-          <LoaderCircle class="spin" :size="18" />
-          <span>{{ t('album.loadingPhotos') }}</span>
-        </div>
-        <div v-else-if="!myShares.length" class="shares-empty">
-          <span>{{ t('album.noShareLinks') }}</span>
-          <small>{{ t('album.noShareLinksHint') }}</small>
-        </div>
-        <template v-else>
-          <label class="library-filter share-filter">
-            <Search :size="16" />
-            <input v-model="shareFilter" :placeholder="t('album.filterShareLinks')" />
-            <button v-if="shareFilter" class="search-clear" type="button" :title="t('album.clearShareFilter')" @click="shareFilter = ''">
-              <X :size="14" />
-            </button>
-          </label>
-          <div class="share-status-filter segmented-control" :aria-label="t('album.filterShareStatus')">
-            <button :class="{ active: shareStatusFilter === 'all' }" @click="shareStatusFilter = 'all'">{{ t('album.shareStatusAll') }}</button>
-            <button :class="{ active: shareStatusFilter === 'active' }" @click="shareStatusFilter = 'active'">{{ t('admin.shareStatusActive') }}</button>
-            <button :class="{ active: shareStatusFilter === 'expiring' }" @click="shareStatusFilter = 'expiring'">{{ t('album.shareStatusExpiring') }}</button>
-            <button :class="{ active: shareStatusFilter === 'expired' }" @click="shareStatusFilter = 'expired'">{{ t('admin.shareStatusExpired') }}</button>
-            <button :class="{ active: shareStatusFilter === 'never' }" @click="shareStatusFilter = 'never'">{{ t('album.shareStatusNever') }}</button>
-          </div>
-          <div v-if="!filteredMyShares.length" class="shares-empty">
-            <span>{{ t('album.noMatchingShares') }}</span>
-            <small>{{ shareEmptyHint }}</small>
-          </div>
-          <div v-else class="shares-list">
-            <div v-for="share in filteredMyShares" :key="share.id" class="share-item">
-              <div class="share-item-info">
-                <span class="share-item-title">{{ share.title }}</span>
-                <span class="share-item-meta">{{ shareScopeLabel(share) }}</span>
-                <span class="share-item-meta share-item-status">
-                  <small class="status-pill share-status-pill" :class="shareStatusClass(share)">{{ shareStatusLabel(share) }}</small>
-                  <span class="share-item-expiry">{{ shareExpiryLabel(share) }}</span>
-                </span>
-              </div>
-              <div class="share-item-actions">
-                <button class="share-item-btn" :title="t('album.shareCopyLink')" @click="copyMyShareLink(share)">
-                  <Link2 :size="15" />
-                </button>
-                <button class="share-item-btn" :title="t('common.edit')" @click="openEditShare(share)">
-                  <Pencil :size="15" />
-                </button>
-                <button class="share-item-btn" :title="t('common.delete')" @click="openDeleteShare(share)">
-                  <Trash2 :size="15" />
-                </button>
-              </div>
-            </div>
-          </div>
-        </template>
-      </div>
       </div>
 
-      <div class="sidebar-bottom-fixed">
-        <RouterLink v-if="user?.role === 'admin'" class="admin-link" to="/admin">
-          <Settings :size="18" />
-          {{ t('common.management') }}
-        </RouterLink>
+      <div v-if="isAdmin" class="sidebar-bottom-fixed">
+        <ManagementNav />
       </div>
     </aside>
 
     <section class="content-pane">
+      <AdminView v-if="adminWorkspaceActive" />
+      <template v-else>
       <header class="topbar">
         <button class="icon-button mobile-only" @click="mobileTree = !mobileTree" :title="t('album.foldersTitle')">
           <PanelLeft :size="19" />
@@ -981,6 +677,7 @@
             class="album-card"
             :style="{ '--tile-index': albumIndex }"
             @click="openAlbumView(album)"
+            @contextmenu.prevent="openAlbumContextMenu($event, album)"
           >
             <div class="album-card-cover">
               <img v-if="album.cover_asset_id" :src="thumbnailUrl(album.cover_asset_id, 'small')" alt="" loading="lazy" />
@@ -1186,6 +883,7 @@
         <LoaderCircle class="spin" :size="16" />
         {{ t('album.loadingPhotos') }}
       </div>
+      </template>
     </section>
 
     <Teleport to="body">
@@ -1707,6 +1405,33 @@
     </Teleport>
 
     <Teleport to="body">
+      <div
+        v-if="contextMenuAlbum"
+        class="context-menu-backdrop"
+        @click="closeAlbumContextMenu"
+        @contextmenu.prevent="closeAlbumContextMenu"
+      />
+      <ul
+        v-if="contextMenuAlbum"
+        class="context-menu"
+        :style="{ left: contextMenuAlbumPos.x + 'px', top: contextMenuAlbumPos.y + 'px' }"
+      >
+        <li>
+          <button @click="contextMenuEditAlbum">
+            <Pencil :size="16" />
+            {{ t('album.editAlbum') }}
+          </button>
+        </li>
+        <li>
+          <button @click="contextMenuDeleteAlbum">
+            <Trash2 :size="16" />
+            {{ t('album.deleteAlbum') }}
+          </button>
+        </li>
+      </ul>
+    </Teleport>
+
+    <Teleport to="body">
       <div v-if="coverPickerFolder" class="modal-backdrop" @click="closeCoverPicker">
         <div class="cover-picker-modal" @click.stop>
           <div class="modal-header">
@@ -2005,6 +1730,8 @@
           </button>
         </div>
 
+        <ManagementNav v-if="isAdmin" variant="sheet" @navigate="showMoreSheet = false" />
+
         <div class="more-sheet-group">
           <span class="more-sheet-group-label">{{ t('common.app') }}</span>
           <button class="more-sheet-item" @click="toggleTheme(); showMoreSheet = false">
@@ -2092,7 +1819,7 @@
       </div>
     </Teleport>
 
-    <nav v-if="!albumOverviewView" class="bottom-nav mobile-only">
+    <nav v-if="!albumOverviewView && !adminWorkspaceActive" class="bottom-nav mobile-only">
       <button class="bottom-nav-item" :class="{ active: rootViewActive }" @click="goRoot">
         <FolderRoot :size="20" />
         <span>{{ t('common.libraries') }}</span>
@@ -2115,7 +1842,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
-import { useRouter } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import {
   Aperture,
   ArrowDownAZ,
@@ -2150,7 +1877,6 @@ import {
   Plus,
   RefreshCw,
   Search,
-  Settings,
   Share2,
   Star,
   Sun,
@@ -2160,11 +1886,13 @@ import {
   X,
 } from 'lucide-vue-next';
 import LanguageToggle from '../components/LanguageToggle.vue';
+import ManagementNav from '../components/ManagementNav.vue';
 import PhotoViewer from '../components/PhotoViewer.vue';
 import { useLocale } from '../composables/useLocale';
 import { useTheme } from '../composables/useTheme';
 import { api, thumbnailUrl } from '../services/api';
 import type { Asset, AssetCamera, AssetLens, AssetPlace, AssetRating, AssetTag, Folder as FolderType, PhotoAlbum, ShareLink, User } from '../types';
+import AdminView from './AdminView.vue';
 
 type ThumbSize = 'small' | 'medium' | 'large';
 type SortMode = 'date' | 'name' | 'size';
@@ -2183,10 +1911,12 @@ type PlaceCluster = {
 };
 
 const router = useRouter();
+const route = useRoute();
 const { isDark, toggleTheme } = useTheme();
 const { t, formatCount, formatDate } = useLocale();
 const user = ref<User | null>(null);
 const isAdmin = computed(() => user.value?.role === 'admin');
+const adminWorkspaceActive = computed(() => route.meta.admin === true);
 const rootFolders = ref<FolderType[]>([]);
 const childFolders = ref<FolderType[]>([]);
 const currentFolder = ref<FolderType | null>(null);
@@ -2249,6 +1979,8 @@ let albumAssetPickerRequestId = 0;
 
 const contextMenuFolder = ref<FolderType | null>(null);
 const contextMenuPos = ref({ x: 0, y: 0 });
+const contextMenuAlbum = ref<PhotoAlbum | null>(null);
+const contextMenuAlbumPos = ref({ x: 0, y: 0 });
 const coverPickerFolder = ref<FolderType | null>(null);
 const coverPickerCurrentFolder = ref<FolderType | null>(null);
 const coverPickerChildFolders = ref<FolderType[]>([]);
@@ -2456,6 +2188,12 @@ const rootViewActive = computed(
     !albumOverviewView.value &&
     !globalSearchActive.value,
 );
+
+async function ensureAlbumRoute() {
+  if (adminWorkspaceActive.value) {
+    await router.push({ name: 'album' });
+  }
+}
 
 const pageEyebrow = computed(() => {
   if (currentAlbum.value) return t('album.albumEyebrow');
@@ -2823,6 +2561,7 @@ async function openFolder(folder: FolderType) {
 }
 
 async function openFolderById(folderId: number, fallbackMessage = t('album.unableOpenFolder')) {
+  await ensureAlbumRoute();
   loading.value = true;
   error.value = '';
   cancelSearchTimer();
@@ -2858,7 +2597,8 @@ async function openFolderById(folderId: number, fallbackMessage = t('album.unabl
   }
 }
 
-function goRoot() {
+async function goRoot() {
+  await ensureAlbumRoute();
   search.value = '';
   cancelSearchTimer();
   searchLoading.value = false;
@@ -3138,6 +2878,7 @@ async function openAssetFolder(asset: Asset) {
 }
 
 async function openAllPhotosView() {
+  await ensureAlbumRoute();
   loading.value = true;
   error.value = '';
   search.value = '';
@@ -3176,6 +2917,7 @@ async function openAllPhotosView() {
 }
 
 async function openRecentView() {
+  await ensureAlbumRoute();
   loading.value = true;
   error.value = '';
   search.value = '';
@@ -3214,6 +2956,7 @@ async function openRecentView() {
 }
 
 async function openVideosView() {
+  await ensureAlbumRoute();
   loading.value = true;
   error.value = '';
   search.value = '';
@@ -3250,6 +2993,7 @@ async function openVideosView() {
 }
 
 async function openAlbumView(album: PhotoAlbum) {
+  await ensureAlbumRoute();
   loading.value = true;
   error.value = '';
   search.value = '';
@@ -3286,6 +3030,7 @@ async function openAlbumView(album: PhotoAlbum) {
 }
 
 async function openFavoritesView() {
+  await ensureAlbumRoute();
   loading.value = true;
   error.value = '';
   search.value = '';
@@ -3324,6 +3069,7 @@ async function openFavoritesView() {
 }
 
 async function openPlacesView() {
+  await ensureAlbumRoute();
   loading.value = true;
   error.value = '';
   search.value = '';
@@ -3361,6 +3107,7 @@ async function openPlacesView() {
 }
 
 async function openAlbumOverviewView() {
+  await ensureAlbumRoute();
   loading.value = true;
   error.value = '';
   search.value = '';
@@ -3398,6 +3145,7 @@ async function openAlbumOverviewView() {
 }
 
 async function openTagView(tagName: string) {
+  await ensureAlbumRoute();
   loading.value = true;
   error.value = '';
   search.value = '';
@@ -3435,6 +3183,7 @@ async function openTagView(tagName: string) {
 }
 
 async function openRatingView(rating: number) {
+  await ensureAlbumRoute();
   const normalizedRating = Math.min(5, Math.max(1, Math.trunc(rating)));
   loading.value = true;
   error.value = '';
@@ -3474,6 +3223,7 @@ async function openRatingView(rating: number) {
 }
 
 async function openCameraView(camera: AssetCamera) {
+  await ensureAlbumRoute();
   loading.value = true;
   error.value = '';
   search.value = '';
@@ -3512,6 +3262,7 @@ async function openCameraView(camera: AssetCamera) {
 }
 
 async function openLensView(lens: AssetLens) {
+  await ensureAlbumRoute();
   loading.value = true;
   error.value = '';
   search.value = '';
@@ -3557,6 +3308,32 @@ function openContextMenu(event: MouseEvent, folder: FolderType) {
 
 function closeContextMenu() {
   contextMenuFolder.value = null;
+}
+
+function openAlbumContextMenu(event: MouseEvent, album: PhotoAlbum) {
+  event.preventDefault();
+  contextMenuAlbum.value = album;
+  contextMenuAlbumPos.value = { x: event.clientX, y: event.clientY };
+}
+
+function closeAlbumContextMenu() {
+  contextMenuAlbum.value = null;
+}
+
+function contextMenuEditAlbum() {
+  const album = contextMenuAlbum.value;
+  if (!album) return;
+  closeAlbumContextMenu();
+  openAlbumView(album);
+  nextTick(() => openEditAlbum());
+}
+
+function contextMenuDeleteAlbum() {
+  const album = contextMenuAlbum.value;
+  if (!album) return;
+  closeAlbumContextMenu();
+  openAlbumView(album);
+  nextTick(() => openDeleteAlbum());
 }
 
 async function openCoverPicker(folder: FolderType) {
@@ -3880,6 +3657,7 @@ function selectAllVisibleAssets() {
 }
 
 async function openPlace(place: PlaceCluster) {
+  await ensureAlbumRoute();
   loading.value = true;
   error.value = '';
   cancelSearchTimer();
@@ -4520,7 +4298,9 @@ function toggleSection(name: string) {
 }
 
 async function toggleSharesPanel() {
-  showSharesPanel.value = !showSharesPanel.value;
+  const nextOpen = !showSharesPanel.value;
+  if (nextOpen) await ensureAlbumRoute();
+  showSharesPanel.value = nextOpen;
   if (showSharesPanel.value) await loadMyShares();
 }
 

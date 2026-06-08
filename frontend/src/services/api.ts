@@ -16,6 +16,7 @@ import type {
   ScanJob,
   ServerSettings,
   ShareLink,
+  ThumbnailCleanupResult,
   ThumbnailStats,
   User,
 } from '../types';
@@ -98,6 +99,9 @@ export const api = {
   },
   thumbnailStats() {
     return request<ThumbnailStats>('/api/admin/thumbnail-stats');
+  },
+  cleanupThumbnails() {
+    return request<ThumbnailCleanupResult>('/api/admin/maintenance/cleanup-thumbnails', { method: 'POST' });
   },
   serverSettings() {
     return request<ServerSettings>('/api/admin/settings');

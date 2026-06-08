@@ -128,6 +128,12 @@ export interface ThumbnailStats {
   large_count: number;
 }
 
+export interface ThumbnailCleanupResult {
+  deleted_files: number;
+  freed_bytes: number;
+  deleted_dirs: number;
+}
+
 export interface ServerSettings {
   thumb_workers: number;
   cpu_count: number | null;
