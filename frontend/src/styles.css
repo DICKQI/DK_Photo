@@ -6981,6 +6981,10 @@ select:focus {
   color: #e5edf8;
 }
 
+:root[data-theme="dark"] .scan-indicator-badge {
+  color: #101827;
+}
+
 :root[data-theme="dark"] .scan-indicator-job + .scan-indicator-job {
   border-top-color: rgba(255, 255, 255, 0.08);
 }
