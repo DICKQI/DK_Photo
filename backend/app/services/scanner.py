@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import concurrent.futures
 import mimetypes
+import os
 import threading
 from datetime import datetime
 from fractions import Fraction
@@ -9,6 +10,13 @@ from pathlib import Path
 from typing import Any
 
 from PIL import ExifTags, Image, UnidentifiedImageError
+from PIL.Image import DecompressionBombError
+
+_max_pixels_env = os.getenv("DK_PHOTO_MAX_IMAGE_PIXELS", "")
+if _max_pixels_env:
+    Image.MAX_IMAGE_PIXELS = int(_max_pixels_env)
+elif Image.MAX_IMAGE_PIXELS is not None:
+    Image.MAX_IMAGE_PIXELS = max(Image.MAX_IMAGE_PIXELS, 500_000_000)
 from sqlalchemy import delete as sa_delete
 from sqlalchemy import func
 from sqlmodel import Session, select
@@ -141,7 +149,7 @@ def get_image_metadata(path: Path) -> dict[str, Any]:
             else:
                 metadata["width"], metadata["height"] = raw_width, raw_height
 
-    except (OSError, UnidentifiedImageError):
+    except (OSError, UnidentifiedImageError, DecompressionBombError):
         return metadata
 
     metadata.update(exif_data)
