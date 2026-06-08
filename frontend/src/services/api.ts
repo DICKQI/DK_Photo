@@ -97,6 +97,9 @@ export const api = {
   jobs() {
     return request<ScanJob[]>('/api/admin/jobs');
   },
+  activeJobs() {
+    return request<ScanJob[]>('/api/admin/jobs/active');
+  },
   thumbnailStats() {
     return request<ThumbnailStats>('/api/admin/thumbnail-stats');
   },

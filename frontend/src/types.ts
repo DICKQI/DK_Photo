@@ -118,6 +118,7 @@ export interface ScanJob {
   processed_assets: number;
   started_at: string | null;
   finished_at: string | null;
+  library_name?: string | null;
 }
 
 export interface ThumbnailStats {

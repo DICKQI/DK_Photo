@@ -8,7 +8,7 @@ from sqlalchemy import func, or_
 from sqlmodel import Session, select
 
 from app.config import get_thumb_workers, reset_thumb_workers, set_thumb_workers, settings
-from app.deps import AdminUser, SessionDep
+from app.deps import AdminUser, CurrentUser, SessionDep
 from app.models import (
     Asset,
     AssetFavorite,
@@ -275,6 +275,32 @@ def _run_job_in_new_session(job_id: int) -> None:
 @router.get("/jobs", response_model=list[ScanJobRead])
 def list_jobs(session: SessionDep, _: AdminUser) -> list[ScanJob]:
     return session.exec(select(ScanJob).order_by(ScanJob.id.desc()).limit(40)).all()
+
+
+@router.get("/jobs/active", response_model=list[ScanJobRead])
+def list_active_jobs(session: SessionDep, _: CurrentUser) -> list[ScanJobRead]:
+    """Return only queued/running scan jobs. Accessible to all authenticated users."""
+    rows = session.exec(
+        select(ScanJob, LibraryRoot.name)
+        .join(LibraryRoot, ScanJob.library_id == LibraryRoot.id, isouter=True)
+        .where(ScanJob.status.in_(("queued", "running")))
+        .order_by(ScanJob.id.desc())
+    ).all()
+    result: list[ScanJobRead] = []
+    for job, lib_name in rows:
+        result.append(ScanJobRead(
+            id=job.id or 0,
+            library_id=job.library_id,
+            status=job.status,
+            message=job.message,
+            total_assets=job.total_assets,
+            total_estimated=job.total_estimated,
+            processed_assets=job.processed_assets,
+            started_at=job.started_at,
+            finished_at=job.finished_at,
+            library_name=lib_name or f"Library {job.library_id}",
+        ))
+    return result
 
 
 @router.post("/jobs/{job_id}/cancel")

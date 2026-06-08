@@ -24,6 +24,7 @@
           <ExternalLink :size="18" />
           GitHub
         </a>
+        <span id="scan-indicator-slot"></span>
       </div>
     </header>
 

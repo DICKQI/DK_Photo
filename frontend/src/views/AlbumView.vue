@@ -359,6 +359,7 @@
           <button class="icon-button desktop-only-action" :title="t('common.signOut')" @click="logout">
             <LogOut :size="18" />
           </button>
+          <span id="scan-indicator-slot"></span>
         </div>
       </header>
 

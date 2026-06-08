@@ -198,6 +198,7 @@ class ScanJobRead(BaseModel):
     processed_assets: int = 0
     started_at: Optional[datetime]
     finished_at: Optional[datetime]
+    library_name: Optional[str] = None
 
 
 class UserCreate(BaseModel):
