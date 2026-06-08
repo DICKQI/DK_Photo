@@ -49,7 +49,7 @@ from app.security import hash_password
 from app.api.shares import share_read
 from app.services.filesystem import list_children, list_roots
 from app.services.paths import is_docker_photos_root, resolve_library_path
-from app.services.scanner import active_scan_job, request_cancel_scan_job, run_scan_job
+from app.services.scanner import active_scan_job, request_cancel_scan_job, run_scan_job, acquire_scan_creation_lock, release_scan_creation_lock
 
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
@@ -252,13 +252,17 @@ def scan_library_endpoint(
         path_exists = False
     if not path_exists:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Library path does not exist")
-    existing_job = active_scan_job(session, library_id)
-    if existing_job:
-        return existing_job
-    job = ScanJob(library_id=library_id, status="queued", message="Manual scan queued")
-    session.add(job)
-    session.commit()
-    session.refresh(job)
+    lock = acquire_scan_creation_lock(library_id)
+    try:
+        existing_job = active_scan_job(session, library_id)
+        if existing_job:
+            return existing_job
+        job = ScanJob(library_id=library_id, status="queued", message="Manual scan queued")
+        session.add(job)
+        session.commit()
+        session.refresh(job)
+    finally:
+        release_scan_creation_lock(lock)
     background_tasks.add_task(_run_job_in_new_session, job.id or 0)
     return job
 

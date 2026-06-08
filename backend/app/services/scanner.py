@@ -39,6 +39,23 @@ class ScanCancelled(Exception):
 _cancel_events: dict[int, threading.Event] = {}
 _cancel_lock = threading.Lock()
 
+_scan_creation_locks: dict[int, threading.Lock] = {}
+_scan_creation_locks_lock = threading.Lock()
+
+
+def acquire_scan_creation_lock(library_id: int) -> threading.Lock:
+    with _scan_creation_locks_lock:
+        lock = _scan_creation_locks.get(library_id)
+        if lock is None:
+            lock = threading.Lock()
+            _scan_creation_locks[library_id] = lock
+    lock.acquire()
+    return lock
+
+
+def release_scan_creation_lock(lock: threading.Lock) -> None:
+    lock.release()
+
 
 def request_cancel_scan_job(job_id: int) -> bool:
     with _cancel_lock:
