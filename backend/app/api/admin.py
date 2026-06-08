@@ -639,14 +639,23 @@ def get_thumbnail_stats(session: SessionDep, _: AdminUser) -> ThumbnailStats:
     ).all()
     count_map = {size: cnt for size, cnt in counts}
 
-    total_size_bytes = 0
-    thumbnail_root = settings.thumbnail_dir
-    if thumbnail_root.exists():
-        for path in thumbnail_root.rglob("*.webp"):
-            try:
-                total_size_bytes += path.stat().st_size
-            except OSError:
-                pass
+    null_count = session.exec(
+        select(func.count(Thumbnail.id)).where(Thumbnail.file_size == None)  # type: ignore[arg-type]
+    ).one()[0]
+
+    if null_count > 0:
+        total_size_bytes = 0
+        thumbnail_root = settings.thumbnail_dir
+        if thumbnail_root.exists():
+            for path in thumbnail_root.rglob("*.webp"):
+                try:
+                    total_size_bytes += path.stat().st_size
+                except OSError:
+                    pass
+    else:
+        total_size_bytes = session.exec(
+            select(func.coalesce(func.sum(Thumbnail.file_size), 0))  # type: ignore[arg-type]
+        ).one()[0]
 
     return ThumbnailStats(
         total_count=sum(count_map.values()),
@@ -655,6 +664,61 @@ def get_thumbnail_stats(session: SessionDep, _: AdminUser) -> ThumbnailStats:
         medium_count=count_map.get("medium", 0),
         large_count=count_map.get("large", 0),
     )
+
+
+def _backfill_thumbnail_sizes(session: Session, thumbnail_root: Path) -> int:
+    if not thumbnail_root.exists():
+        return 0
+
+    updated = 0
+    batch_size = 500
+    null_thumbs = session.exec(
+        select(Thumbnail).where(Thumbnail.file_size == None)  # type: ignore[arg-type]
+    )
+
+    for i, thumb in enumerate(null_thumbs):
+        thumb_path = Path(thumb.path)
+        if thumb_path.exists():
+            try:
+                thumb.file_size = thumb_path.stat().st_size
+                updated += 1
+            except OSError:
+                pass
+        if (i + 1) % batch_size == 0:
+            session.commit()
+
+    if updated % batch_size != 0:
+        session.commit()
+
+    return updated
+
+
+def start_backfill_thread() -> None:
+    import threading
+
+    from app.db import engine as db_engine
+
+    def _run():
+        with Session(db_engine) as session:
+            try:
+                updated = _backfill_thumbnail_sizes(session, settings.thumbnail_dir)
+                if updated > 0:
+                    import logging
+                    logging.getLogger("uvicorn").info(
+                        "Thumbnail file_size backfill complete: %d records updated", updated
+                    )
+            except Exception:
+                import logging
+                logging.getLogger("uvicorn").exception("Thumbnail file_size backfill failed")
+
+    thread = threading.Thread(target=_run, daemon=True)
+    thread.start()
+
+
+@router.post("/maintenance/backfill-thumbnail-sizes")
+def backfill_thumbnail_sizes(session: SessionDep, _: AdminUser) -> dict:
+    updated = _backfill_thumbnail_sizes(session, settings.thumbnail_dir)
+    return {"updated": updated}
 
 
 @router.get("/settings", response_model=ServerSettingsRead)

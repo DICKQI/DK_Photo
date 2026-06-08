@@ -80,7 +80,10 @@ def _save_thumbnail_record(
     width: int,
     height: int,
     existing_id: int | None = None,
+    file_size: int | None = None,
 ) -> None:
+    if file_size is None and output_path.exists():
+        file_size = output_path.stat().st_size
     existing = session.get(Thumbnail, existing_id) if existing_id else None
     if not existing:
         existing = session.exec(select(Thumbnail).where(Thumbnail.asset_id == asset_id, Thumbnail.size == size)).first()
@@ -89,8 +92,9 @@ def _save_thumbnail_record(
         existing.path = str(output_path)
         existing.width = width
         existing.height = height
+        existing.file_size = file_size
     else:
-        session.add(Thumbnail(asset_id=asset_id, size=size, path=str(output_path), width=width, height=height))
+        session.add(Thumbnail(asset_id=asset_id, size=size, path=str(output_path), width=width, height=height, file_size=file_size))
     try:
         session.commit()
     except OperationalError:
@@ -159,6 +163,7 @@ def _save_thumbnail_results(
 ) -> int:
     saved = 0
     for asset, output_path, width, height in results:
+        file_size = output_path.stat().st_size if output_path.exists() else None
         existing = session.exec(
             select(Thumbnail).where(Thumbnail.asset_id == asset.id, Thumbnail.size == size)
         ).first()
@@ -167,6 +172,7 @@ def _save_thumbnail_results(
             existing.path = str(output_path)
             existing.width = width
             existing.height = height
+            existing.file_size = file_size
         else:
             session.add(
                 Thumbnail(
@@ -175,6 +181,7 @@ def _save_thumbnail_results(
                     path=str(output_path),
                     width=width,
                     height=height,
+                    file_size=file_size,
                 )
             )
         saved += 1
@@ -227,11 +234,13 @@ def bulk_generate_thumbnails(
         if asset.mime_type.startswith("video/"):
             output_path.parent.mkdir(parents=True, exist_ok=True)
             width, height = write_video_placeholder(output_path, max_size)
+            file_size = output_path.stat().st_size
             if existing:
                 _delete_old_thumbnail(existing, output_path)
                 existing.path = str(output_path)
                 existing.width = width
                 existing.height = height
+                existing.file_size = file_size
             else:
                 session.add(
                     Thumbnail(
@@ -240,6 +249,7 @@ def bulk_generate_thumbnails(
                         path=str(output_path),
                         width=width,
                         height=height,
+                        file_size=file_size,
                     )
                 )
             generated_count += 1
@@ -336,11 +346,13 @@ def flush_thumbnails(session: Session, results: list[dict]) -> None:
             )
         ).first()
         new_path = Path(entry["path"])
+        file_size = new_path.stat().st_size if new_path.exists() else None
         if existing:
             _delete_old_thumbnail(existing, new_path)
             existing.path = entry["path"]
             existing.width = entry["width"]
             existing.height = entry["height"]
+            existing.file_size = file_size
         else:
             session.add(
                 Thumbnail(
@@ -349,6 +361,7 @@ def flush_thumbnails(session: Session, results: list[dict]) -> None:
                     path=entry["path"],
                     width=entry["width"],
                     height=entry["height"],
+                    file_size=file_size,
                 )
             )
     session.commit()

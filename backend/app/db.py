@@ -41,6 +41,8 @@ def create_db_and_tables() -> None:
         disable_legacy_docker_photos_root_library(session)
         ensure_default_library(session)
         resume_library_cleanups(session)
+    from app.api.admin import start_backfill_thread
+    start_backfill_thread()
 
 
 def run_lightweight_migrations() -> None:
@@ -99,6 +101,10 @@ def run_lightweight_migrations() -> None:
     if "watch_enabled" not in library_columns:
         with engine.begin() as connection:
             connection.execute(text("ALTER TABLE libraryroot ADD COLUMN watch_enabled BOOLEAN NOT NULL DEFAULT 0"))
+    thumbnail_columns = {column["name"] for column in inspector.get_columns("thumbnail")} if inspector.has_table("thumbnail") else set()
+    if "file_size" not in thumbnail_columns:
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE thumbnail ADD COLUMN file_size INTEGER"))
 
 
 def get_session() -> Generator[Session, None, None]:

@@ -143,6 +143,7 @@ class Thumbnail(SQLModel, table=True):
     path: str
     width: int
     height: int
+    file_size: Optional[int] = Field(default=None)
     created_at: datetime = Field(default_factory=utc_now)
 
 
