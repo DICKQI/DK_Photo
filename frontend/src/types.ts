@@ -141,6 +141,13 @@ export interface ServerSettings {
   thumb_workers_default: number;
 }
 
+export interface LogEntry {
+  timestamp: string;
+  level: string;
+  logger: string;
+  message: string;
+}
+
 export interface ShareLink {
   id: number;
   token: string;

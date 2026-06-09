@@ -348,6 +348,7 @@
           </footer>
         </div>
       </article>
+      <LogViewer v-if="activeModule === 'settings'" />
       </div>
 
       <div v-if="activeModule === 'libraries' || activeModule === 'tools'" class="admin-grid-row admin-monitor-grid single-panel-row">
@@ -723,6 +724,7 @@ import {
 } from 'lucide-vue-next';
 import DirectoryPicker from '../components/DirectoryPicker.vue';
 import LanguageToggle from '../components/LanguageToggle.vue';
+import LogViewer from '../components/LogViewer.vue';
 import ManagementNav from '../components/ManagementNav.vue';
 import { useLocale } from '../composables/useLocale';
 import { useTheme } from '../composables/useTheme';

@@ -312,6 +312,13 @@ class ThumbnailStats(BaseModel):
     large_count: int = 0
 
 
+class LogEntry(BaseModel):
+    timestamp: str
+    level: str
+    logger: str
+    message: str
+
+
 class ServerSettingsRead(BaseModel):
     thumb_workers: int
     cpu_count: int | None

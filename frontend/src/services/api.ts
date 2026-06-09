@@ -11,6 +11,7 @@ import type {
   Library,
   LibraryUpdate,
   LibraryPermission,
+  LogEntry,
   PhotoAlbum,
   PublicShare,
   ScanJob,
@@ -363,6 +364,10 @@ export const api = {
     return downloadRequest(publicShareDownloadUrl(token));
   },
 };
+
+export function logStreamUrl() {
+  return '/api/admin/logs/stream';
+}
 
 export function thumbnailUrl(assetId: number, size = 'medium') {
   return `/api/assets/${assetId}/thumbnail?size=${size}`;

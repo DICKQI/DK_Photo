@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app import logger
 from app.api import admin, albums, assets, auth, folders, shares
 from app.config import settings
 from app.db import create_db_and_tables
@@ -26,6 +27,7 @@ watcher = LibraryWatcher()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     create_db_and_tables()
+    logger.setup_logging()
     if settings.watch_enabled:
         watcher.start()
     yield

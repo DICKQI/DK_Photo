@@ -1,9 +1,13 @@
 from __future__ import annotations
 
-from datetime import timedelta
+import asyncio
+import json as _json
+
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, status
+from starlette.responses import StreamingResponse
 from sqlalchemy import func, or_
 from sqlmodel import Session, select
 
@@ -45,6 +49,7 @@ from app.schemas import (
     UserRead,
     UserUpdate,
 )
+from app import logger
 from app.security import hash_password
 from app.api.shares import share_read
 from app.services.filesystem import list_children, list_roots
@@ -746,6 +751,31 @@ def update_settings(payload: ServerSettingsUpdate, _: AdminUser) -> ServerSettin
         cpu_count=os.cpu_count(),
         thumb_workers_default=settings.thumb_workers,
     )
+
+
+@router.get("/logs/stream")
+async def log_stream(_: AdminUser):
+    queue = logger.subscribe()
+
+    async def generate():
+        try:
+            for entry in logger.get_recent():
+                yield f"data: {_json.dumps(entry.model_dump())}\n\n"
+            while True:
+                while not queue.empty():
+                    entry = queue.get_nowait()
+                    yield f"data: {_json.dumps(entry.model_dump())}\n\n"
+                try:
+                    entry = await asyncio.wait_for(queue.get(), timeout=30.0)
+                    yield f"data: {_json.dumps(entry.model_dump())}\n\n"
+                except asyncio.TimeoutError:
+                    yield ": heartbeat\n\n"
+                except Exception:
+                    break
+        finally:
+            logger.unsubscribe(queue)
+
+    return StreamingResponse(generate(), media_type="text/event-stream")
 
 
 @router.delete("/settings/thumb-workers-reset")
