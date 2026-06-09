@@ -6923,8 +6923,7 @@ select:focus {
   top: 100%;
   right: 0;
   margin-top: 8px;
-  min-width: 260px;
-  max-width: 340px;
+  width: min(420px, calc(100vw - 32px));
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -6961,11 +6960,9 @@ select:focus {
 }
 
 .scan-indicator-job {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 6px 0;
+  display: grid;
+  gap: 4px;
+  padding: 7px 0;
   font-size: 13px;
   color: var(--muted);
 }
@@ -6974,12 +6971,21 @@ select:focus {
   border-top: 1px solid rgba(0, 0, 0, 0.06);
 }
 
+.scan-job-summary {
+  display: grid;
+  grid-template-columns: minmax(80px, 1fr) max-content;
+  align-items: baseline;
+  gap: 14px;
+  min-width: 0;
+}
+
 .scan-job-name {
+  min-width: 0;
+  color: #24324a;
   font-weight: 500;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  flex: 1;
 }
 
 .scan-job-progress {
@@ -6988,25 +6994,20 @@ select:focus {
   font-variant-numeric: tabular-nums;
 }
 
-.scan-job-progress-group {
-  display: grid;
-  justify-items: end;
-  gap: 2px;
-  min-width: 0;
-  max-width: 230px;
-  text-align: right;
-}
-
 .scan-job-detail {
-  max-width: 220px;
   color: var(--muted);
   font-size: 12px;
   line-height: 1.35;
+  text-align: right;
   white-space: normal;
   font-variant-numeric: tabular-nums;
 }
 
 :root[data-theme="dark"] .scan-indicator-popup {
+  color: #e5edf8;
+}
+
+:root[data-theme="dark"] .scan-job-name {
   color: #e5edf8;
 }
 
