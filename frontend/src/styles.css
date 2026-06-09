@@ -2960,6 +2960,17 @@ select:focus {
   gap: 8px;
 }
 
+.scan-progress-main,
+.scan-progress-detail {
+  font-variant-numeric: tabular-nums;
+}
+
+.scan-progress-detail {
+  max-width: min(620px, 100%);
+  white-space: normal;
+  text-align: right;
+}
+
 .wide-panel {
   grid-column: 1 / -1;
 }
@@ -6951,7 +6962,7 @@ select:focus {
 
 .scan-indicator-job {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
   padding: 6px 0;
@@ -6974,6 +6985,24 @@ select:focus {
 .scan-job-progress {
   white-space: nowrap;
   color: var(--accent, #3b82f6);
+  font-variant-numeric: tabular-nums;
+}
+
+.scan-job-progress-group {
+  display: grid;
+  justify-items: end;
+  gap: 2px;
+  min-width: 0;
+  max-width: 230px;
+  text-align: right;
+}
+
+.scan-job-detail {
+  max-width: 220px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+  white-space: normal;
   font-variant-numeric: tabular-nums;
 }
 

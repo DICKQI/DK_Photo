@@ -84,7 +84,12 @@ def run_lightweight_migrations() -> None:
     scanjob_columns = {column["name"] for column in inspector.get_columns("scanjob")} if inspector.has_table("scanjob") else set()
     scanjob_migrations = {
         "total_estimated": "ALTER TABLE scanjob ADD COLUMN total_estimated INTEGER",
+        "total_estimated_images": "ALTER TABLE scanjob ADD COLUMN total_estimated_images INTEGER NOT NULL DEFAULT 0",
+        "total_estimated_videos": "ALTER TABLE scanjob ADD COLUMN total_estimated_videos INTEGER NOT NULL DEFAULT 0",
         "processed_assets": "ALTER TABLE scanjob ADD COLUMN processed_assets INTEGER NOT NULL DEFAULT 0",
+        "processed_images": "ALTER TABLE scanjob ADD COLUMN processed_images INTEGER NOT NULL DEFAULT 0",
+        "processed_videos": "ALTER TABLE scanjob ADD COLUMN processed_videos INTEGER NOT NULL DEFAULT 0",
+        "thumbnail_ready_images": "ALTER TABLE scanjob ADD COLUMN thumbnail_ready_images INTEGER NOT NULL DEFAULT 0",
     }
     with engine.begin() as connection:
         for column, statement in scanjob_migrations.items():

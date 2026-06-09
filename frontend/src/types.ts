@@ -115,7 +115,12 @@ export interface ScanJob {
   message: string;
   total_assets: number;
   total_estimated: number | null;
+  total_estimated_images: number;
+  total_estimated_videos: number;
   processed_assets: number;
+  processed_images: number;
+  processed_videos: number;
+  thumbnail_ready_images: number;
   started_at: string | null;
   finished_at: string | null;
   library_name?: string | null;

@@ -18,13 +18,9 @@
       <ul class="scan-indicator-list">
         <li v-for="job in activeJobs" :key="job.id" class="scan-indicator-job">
           <span class="scan-job-name">{{ job.library_name || `Library ${job.library_id}` }}</span>
-          <span class="scan-job-progress">
-            <template v-if="job.total_estimated && job.total_estimated > 0">
-              {{ t('admin.scanningProgressTotal', { count: job.processed_assets.toLocaleString(), total: job.total_estimated.toLocaleString() }) }}
-            </template>
-            <template v-else>
-              {{ t('admin.scanningProgress', { count: job.processed_assets.toLocaleString() }) }}
-            </template>
+          <span class="scan-job-progress-group">
+            <span class="scan-job-progress">{{ scanMediaProgressLabel(job) }}</span>
+            <span v-if="scanCompactBreakdownLabel(job)" class="scan-job-detail">{{ scanCompactBreakdownLabel(job) }}</span>
           </span>
         </li>
       </ul>
@@ -36,7 +32,27 @@
 import { LoaderCircle } from 'lucide-vue-next';
 import { useLocale } from '../composables/useLocale';
 import { useScanJobs } from '../composables/useScanJobs';
+import type { ScanJob } from '../types';
 
 const { t } = useLocale();
 const { activeJobs, visible } = useScanJobs();
+
+function scanMediaProgressLabel(job: ScanJob) {
+  if (job.total_estimated && job.total_estimated > 0) {
+    return t('admin.scanMediaProgressTotal', { count: job.processed_assets.toLocaleString(), total: job.total_estimated.toLocaleString() });
+  }
+  return t('admin.scanMediaProgress', { count: job.processed_assets.toLocaleString() });
+}
+
+function scanCompactBreakdownLabel(job: ScanJob) {
+  const parts: string[] = [];
+  if (job.processed_images || job.total_estimated_images) {
+    parts.push(t('admin.scanImageProgress', { count: job.processed_images.toLocaleString() }));
+  }
+  const thumbnailImageTotal = Math.max(job.processed_images, job.thumbnail_ready_images);
+  if (thumbnailImageTotal > 0) {
+    parts.push(t('admin.scanThumbnailReadyImages', { count: job.thumbnail_ready_images.toLocaleString(), total: thumbnailImageTotal.toLocaleString() }));
+  }
+  return parts.join(' · ');
+}
 </script>

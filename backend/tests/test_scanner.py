@@ -181,8 +181,14 @@ def test_scan_job_reports_indexed_media_items(tmp_path: Path) -> None:
         assert updated is not None
         assert updated.status == "completed"
         assert updated.total_assets == 2
+        assert updated.total_estimated == 2
+        assert updated.total_estimated_images == 1
+        assert updated.total_estimated_videos == 1
         assert updated.message == "Indexed 2 media items"
         assert updated.processed_assets == 2
+        assert updated.processed_images == 1
+        assert updated.processed_videos == 1
+        assert updated.thumbnail_ready_images == 0
 
 
 def test_active_scan_job_finds_latest_queued_or_running_job(tmp_path: Path) -> None:
@@ -292,6 +298,9 @@ def test_cancelled_thumbnail_generation_marks_job_cancelled(tmp_path: Path) -> N
         assert updated is not None
         assert updated.status == "cancelled"
         assert updated.total_assets == 1
+        assert updated.processed_assets == 1
+        assert updated.processed_images == 1
+        assert updated.processed_videos == 0
         assert updated.message == "Scan cancelled after 1 items"
 
 
@@ -318,7 +327,10 @@ def test_scan_job_preserves_thumbnail_generation_message(tmp_path: Path) -> None
             assert updated is not None
             assert updated.status == "completed"
             assert updated.total_assets == 1
-            assert updated.message == "Indexed 1 media items, 2 thumbnails generated"
+            assert updated.total_estimated_images == 1
+            assert updated.processed_images == 1
+            assert updated.thumbnail_ready_images == 1
+            assert updated.message == "Indexed 1 media items, 1 thumbnail-ready images"
     finally:
         object.__setattr__(settings, "data_dir", old_data_dir)
 
@@ -498,11 +510,20 @@ def test_pipeline_skips_unchanged_images(tmp_path: Path) -> None:
             first_thumbnails = session.exec(select(Thumbnail)).all()
             assert len(first_thumbnails) == 2
 
-            scan_library(session, library.id or 0, generate_thumbnails=True)
+            job = ScanJob(library_id=library.id or 0, status="running", message="Rescan")
+            session.add(job)
+            session.commit()
+            session.refresh(job)
+
+            scan_library(session, library.id or 0, job=job, generate_thumbnails=True)
             second_thumbnails = session.exec(select(Thumbnail)).all()
             assert len(second_thumbnails) == 2
 
             assert {t.id for t in first_thumbnails} == {t.id for t in second_thumbnails}
+            updated = session.get(ScanJob, job.id or 0)
+            assert updated is not None
+            assert updated.processed_images == 1
+            assert updated.thumbnail_ready_images == 1
     finally:
         object.__setattr__(settings, "data_dir", old_data_dir)
 

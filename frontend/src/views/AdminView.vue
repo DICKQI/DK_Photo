@@ -406,16 +406,12 @@
                   <LoaderCircle v-if="isBusy(cancelJobKey(job.id))" class="spin" :size="16" />
                   <Ban v-else :size="16" />
                 </button>
-                <small v-if="job.status === 'running' || job.status === 'queued'">
+                <small v-if="job.status === 'running' || job.status === 'queued'" class="scan-progress-main">
                   <LoaderCircle class="spin" :size="12" />
-                  <template v-if="job.total_estimated && job.total_estimated > 0">
-                    {{ t('admin.scanningProgressTotal', { count: job.processed_assets.toLocaleString(), total: job.total_estimated.toLocaleString() }) }}
-                  </template>
-                  <template v-else>
-                    {{ t('admin.scanningProgress', { count: job.processed_assets.toLocaleString() }) }}
-                  </template>
+                  {{ scanMediaProgressLabel(job) }}
                 </small>
-                <small v-else>{{ formatCount(job.total_assets, 'media') }}</small>
+                <small v-else>{{ scanMediaProgressLabel(job) }}</small>
+                <small v-if="hasScanBreakdown(job)" class="muted scan-progress-detail">{{ scanBreakdownLabel(job) }}</small>
                 <small class="muted">{{ jobTimeLabel(job) }}</small>
               </div>
             </div>
@@ -1339,6 +1335,47 @@ function jobTimeLabel(job: ScanJob) {
   return t('common.notStarted');
 }
 
+function scanMediaProgressLabel(job: ScanJob) {
+  const count = job.status === 'running' || job.status === 'queued' ? job.processed_assets : job.total_assets;
+  if (job.total_estimated && job.total_estimated > 0) {
+    return t('admin.scanMediaProgressTotal', { count: count.toLocaleString(), total: job.total_estimated.toLocaleString() });
+  }
+  return t('admin.scanMediaProgress', { count: count.toLocaleString() });
+}
+
+function hasScanBreakdown(job: ScanJob) {
+  return Boolean(
+    job.total_estimated_images ||
+      job.total_estimated_videos ||
+      job.processed_images ||
+      job.processed_videos ||
+      job.thumbnail_ready_images,
+  );
+}
+
+function scanBreakdownLabel(job: ScanJob) {
+  const parts: string[] = [];
+  if (job.total_estimated_images || job.processed_images) {
+    parts.push(
+      job.total_estimated_images > 0
+        ? t('admin.scanImageProgressTotal', { count: job.processed_images.toLocaleString(), total: job.total_estimated_images.toLocaleString() })
+        : t('admin.scanImageProgress', { count: job.processed_images.toLocaleString() }),
+    );
+  }
+  if (job.total_estimated_videos || job.processed_videos) {
+    parts.push(
+      job.total_estimated_videos > 0
+        ? t('admin.scanVideoProgressTotal', { count: job.processed_videos.toLocaleString(), total: job.total_estimated_videos.toLocaleString() })
+        : t('admin.scanVideoProgress', { count: job.processed_videos.toLocaleString() }),
+    );
+  }
+  const thumbnailImageTotal = Math.max(job.processed_images, job.thumbnail_ready_images);
+  if (thumbnailImageTotal > 0) {
+    parts.push(t('admin.scanThumbnailReadyImages', { count: job.thumbnail_ready_images.toLocaleString(), total: thumbnailImageTotal.toLocaleString() }));
+  }
+  return parts.join(' · ');
+}
+
 function jobSearchText(job: ScanJob) {
   const libraryName = job.library_id ? libraryNameById(job.library_id) : t('admin.summaryLibraries');
   return [
@@ -1348,6 +1385,8 @@ function jobSearchText(job: ScanJob) {
     job.status,
     job.message || t('common.waiting'),
     formatCount(job.total_assets, 'media'),
+    scanMediaProgressLabel(job),
+    scanBreakdownLabel(job),
     jobTimeLabel(job),
   ]
     .join(' ')

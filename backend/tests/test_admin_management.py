@@ -644,7 +644,7 @@ def test_assets_can_filter_photos_with_location(tmp_path: Path) -> None:
                 "longitude": -122.40,
                 "asset_count": 2,
                 "cover_asset_id": nearby_id,
-                "latest_at": "2024-05-13T10:30:00",
+                "latest_at": "2024-05-13T10:30:00Z",
             }
         ]
         assert filenames(client.get("/api/assets?place=37.81,-122.40")) == {"mapped.jpg", "nearby.jpg"}
@@ -656,7 +656,7 @@ def test_assets_can_filter_photos_with_location(tmp_path: Path) -> None:
                 "longitude": -122.40,
                 "asset_count": 1,
                 "cover_asset_id": mapped_id,
-                "latest_at": "2024-05-12T10:30:00",
+                "latest_at": "2024-05-12T10:30:00Z",
             }
         ]
         assert client.get("/api/assets?place=Unknown").json() == []

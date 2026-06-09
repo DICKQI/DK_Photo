@@ -177,6 +177,11 @@ class ScanJob(SQLModel, table=True):
     message: str = ""
     total_assets: int = 0
     total_estimated: Optional[int] = Field(default=None)
+    total_estimated_images: int = Field(default=0)
+    total_estimated_videos: int = Field(default=0)
     processed_assets: int = Field(default=0)
+    processed_images: int = Field(default=0)
+    processed_videos: int = Field(default=0)
+    thumbnail_ready_images: int = Field(default=0)
     started_at: Optional[datetime] = Field(default=None, sa_type=UTCDateTime)
     finished_at: Optional[datetime] = Field(default=None, sa_type=UTCDateTime)

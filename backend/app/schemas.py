@@ -195,7 +195,12 @@ class ScanJobRead(BaseModel):
     message: str
     total_assets: int
     total_estimated: Optional[int] = None
+    total_estimated_images: int = 0
+    total_estimated_videos: int = 0
     processed_assets: int = 0
+    processed_images: int = 0
+    processed_videos: int = 0
+    thumbnail_ready_images: int = 0
     started_at: Optional[datetime]
     finished_at: Optional[datetime]
     library_name: Optional[str] = None

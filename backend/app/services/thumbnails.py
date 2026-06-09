@@ -314,7 +314,21 @@ def generate_thumbnail_disk_only(
     max_size = THUMBNAIL_SIZES[size]
     output_path = _thumbnail_hash_path(asset_id, asset_path, mtime, size)
     if output_path.exists():
-        return None
+        try:
+            with Image.open(output_path) as image:
+                width, height = image.size
+            return {
+                "asset_id": asset_id,
+                "size": size,
+                "path": str(output_path),
+                "width": width,
+                "height": height,
+            }
+        except Exception:
+            try:
+                output_path.unlink(missing_ok=True)
+            except OSError:
+                return None
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     if mime_type.startswith("video/"):
