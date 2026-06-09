@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import timedelta
 from secrets import token_urlsafe
 from typing import Any
 
@@ -13,7 +13,7 @@ from sqlmodel import select
 from app.config import settings
 from app.deps import CurrentUser, SessionDep
 from app.api.assets import stream_asset_archive
-from app.models import Asset, Folder, LibraryRoot, ShareAsset, ShareLink, User
+from app.models import Asset, Folder, LibraryRoot, ShareAsset, ShareLink, User, utc_now
 from app.schemas import AssetRead, PublicShareRead, ShareCreate, ShareRead, ShareUpdate, ShareVerifyRequest
 from app.security import hash_password, verify_password
 from app.services.paths import safe_asset_path
@@ -26,7 +26,7 @@ SHARE_VERIFY_ALGORITHM = "HS256"
 
 
 def create_share_verify_token(share_token: str) -> str:
-    expires_at = datetime.utcnow() + timedelta(hours=1)
+    expires_at = utc_now() + timedelta(hours=1)
     payload: dict[str, Any] = {"sub": share_token, "type": "share_verify", "exp": expires_at}
     return jwt.encode(payload, settings.secret_key, algorithm=SHARE_VERIFY_ALGORITHM)
 
@@ -73,7 +73,7 @@ def create_share(payload: ShareCreate, session: SessionDep, current_user: Curren
             require_asset_access(session, current_user, a, require_share=True)
     expires_at = None
     if payload.expires_in_days:
-        expires_at = datetime.utcnow() + timedelta(days=payload.expires_in_days)
+        expires_at = utc_now() + timedelta(days=payload.expires_in_days)
     if payload.asset_ids:
         title = payload.title or db_assets[0].filename if db_assets else "Shared photos"
     else:
@@ -122,7 +122,7 @@ def update_share(share_id: int, payload: ShareUpdate, session: SessionDep, curre
         share.title = payload.title
     if payload.expires_in_days is not None:
         if payload.expires_in_days > 0:
-            share.expires_at = datetime.utcnow() + timedelta(days=payload.expires_in_days)
+            share.expires_at = utc_now() + timedelta(days=payload.expires_in_days)
         else:
             share.expires_at = None
     if payload.password is not None:
@@ -145,7 +145,7 @@ def delete_share(share_id: int, session: SessionDep, current_user: CurrentUser) 
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not your share link")
     if share.revoked_at:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Share is already revoked")
-    share.revoked_at = datetime.utcnow()
+    share.revoked_at = utc_now()
     session.add(share)
     session.commit()
     return {"ok": True}
@@ -155,7 +155,7 @@ def get_active_share(session: SessionDep, token: str) -> ShareLink:
     share = session.exec(select(ShareLink).where(ShareLink.token == token)).first()
     if not share or share.revoked_at:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Share not found")
-    if share.expires_at and share.expires_at < datetime.utcnow():
+    if share.expires_at and share.expires_at < utc_now():
         raise HTTPException(status_code=status.HTTP_410_GONE, detail="Share expired")
     if not creator_can_still_share(session, share):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Share not found")

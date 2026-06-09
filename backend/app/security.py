@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import Any
 
 import jwt
 from passlib.context import CryptContext
 
 from app.config import settings
+from app.models import utc_now
 
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -22,7 +23,7 @@ def verify_password(password: str, password_hash: str) -> bool:
 
 
 def create_access_token(subject: str, role: str, token_version: int) -> str:
-    expires_at = datetime.utcnow() + timedelta(minutes=settings.access_token_minutes)
+    expires_at = utc_now() + timedelta(minutes=settings.access_token_minutes)
     payload: dict[str, Any] = {
         "sub": subject,
         "role": role,

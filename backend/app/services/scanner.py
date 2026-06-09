@@ -84,7 +84,7 @@ def _mark_job_cancelled(session: Session, job: ScanJob, total: int, message: str
     job.total_assets = total
     job.processed_assets = total
     job.message = message
-    job.finished_at = datetime.utcnow()
+    job.finished_at = utc_now()
     session.add(job)
     session.commit()
 
@@ -850,7 +850,7 @@ def run_scan_job(session: Session, job_id: int, generate_thumbnails: bool = Fals
             return
 
         job.status = "running"
-        job.started_at = datetime.utcnow()
+        job.started_at = utc_now()
         job.total_estimated = None
         job.processed_assets = 0
         session.commit()
@@ -863,7 +863,7 @@ def run_scan_job(session: Session, job_id: int, generate_thumbnails: bool = Fals
     except Exception as exc:  # pragma: no cover - defensive status reporting
         job.status = "failed"
         job.message = str(exc)
-        job.finished_at = datetime.utcnow()
+        job.finished_at = utc_now()
         session.commit()
         raise
     finally:
@@ -875,5 +875,5 @@ def run_scan_job(session: Session, job_id: int, generate_thumbnails: bool = Fals
         job.total_assets = total
         if "thumbnails generated" not in job.message:
             job.message = f"Indexed {total} media items"
-        job.finished_at = datetime.utcnow()
+        job.finished_at = utc_now()
     session.commit()

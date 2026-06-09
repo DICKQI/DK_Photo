@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import timedelta
 from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, status
@@ -322,7 +322,7 @@ def cancel_scan_job(job_id: int, session: SessionDep, _: AdminUser) -> dict:
         request_cancel_scan_job(job_id)
         job.status = "cancelled"
         job.message = "Scan cancelled before start"
-        job.finished_at = datetime.utcnow()
+        job.finished_at = utc_now()
         session.commit()
         return {"ok": True}
 
