@@ -4,14 +4,16 @@ import os
 import threading
 from pathlib import Path
 
+import pytest
 from PIL import ExifTags, Image, TiffImagePlugin
 from sqlmodel import Session, SQLModel, create_engine, select
 
 from app.config import settings
 from app.db import disable_legacy_docker_photos_root_library, mark_interrupted_scan_jobs
-from app.models import Asset, Folder, LibraryRoot, ScanJob, Thumbnail
+from app.models import Asset, Folder, LibraryRoot, ProcessingError, ScanJob, Thumbnail
 from app.services.scanner import (
     active_scan_job,
+    get_image_metadata,
     is_supported_image,
     is_supported_media,
     is_supported_video,
@@ -49,6 +51,38 @@ def create_exif_photo(path: Path) -> None:
     exif[EXIF_TAGS["FNumber"]] = TiffImagePlugin.IFDRational(28, 10)
     exif[EXIF_TAGS["ExposureTime"]] = TiffImagePlugin.IFDRational(1, 125)
     exif[EXIF_TAGS["FocalLength"]] = TiffImagePlugin.IFDRational(50, 1)
+    exif[EXIF_TAGS["GPSInfo"]] = {
+        GPS_TAGS["GPSLatitudeRef"]: "N",
+        GPS_TAGS["GPSLatitude"]: (
+            TiffImagePlugin.IFDRational(37, 1),
+            TiffImagePlugin.IFDRational(48, 1),
+            TiffImagePlugin.IFDRational(30, 1),
+        ),
+        GPS_TAGS["GPSLongitudeRef"]: "W",
+        GPS_TAGS["GPSLongitude"]: (
+            TiffImagePlugin.IFDRational(122, 1),
+            TiffImagePlugin.IFDRational(24, 1),
+            TiffImagePlugin.IFDRational(15, 1),
+        ),
+    }
+    image.save(path, exif=exif)
+
+
+def create_orientation_exif_photo(path: Path) -> None:
+    """Write a JPEG with Orientation=6 (90° CW), GPS, LensModel, and full EXIF."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    image = Image.new("RGB", (160, 120), "#5b8def")
+    exif = Image.Exif()
+    exif[EXIF_TAGS["Orientation"]] = 6
+    exif[EXIF_TAGS["DateTimeOriginal"]] = "2024:05:12 10:30:45"
+    exif[EXIF_TAGS["DateTimeDigitized"]] = "2024:05:12 10:30:44"
+    exif[EXIF_TAGS["Make"]] = "Canon"
+    exif[EXIF_TAGS["Model"]] = "EOS R6"
+    exif[EXIF_TAGS["LensModel"]] = "RF24-105mm F4 L IS USM"
+    exif[EXIF_TAGS["ISOSpeedRatings"]] = 800
+    exif[EXIF_TAGS["FNumber"]] = TiffImagePlugin.IFDRational(40, 10)
+    exif[EXIF_TAGS["ExposureTime"]] = TiffImagePlugin.IFDRational(1, 250)
+    exif[EXIF_TAGS["FocalLength"]] = TiffImagePlugin.IFDRational(105, 1)
     exif[EXIF_TAGS["GPSInfo"]] = {
         GPS_TAGS["GPSLatitudeRef"]: "N",
         GPS_TAGS["GPSLatitude"]: (
@@ -181,9 +215,9 @@ def test_scan_job_reports_indexed_media_items(tmp_path: Path) -> None:
         assert updated is not None
         assert updated.status == "completed"
         assert updated.total_assets == 2
-        assert updated.total_estimated == 2
-        assert updated.total_estimated_images == 1
-        assert updated.total_estimated_videos == 1
+        assert updated.total_estimated is None
+        assert updated.total_estimated_images == 0
+        assert updated.total_estimated_videos == 0
         assert updated.message == "Indexed 2 media items"
         assert updated.processed_assets == 2
         assert updated.processed_images == 1
@@ -327,7 +361,7 @@ def test_scan_job_preserves_thumbnail_generation_message(tmp_path: Path) -> None
             assert updated is not None
             assert updated.status == "completed"
             assert updated.total_assets == 1
-            assert updated.total_estimated_images == 1
+            assert updated.total_estimated_images == 0
             assert updated.processed_images == 1
             assert updated.thumbnail_ready_images == 1
             assert updated.message == "Indexed 1 media items, 1 thumbnail-ready images"
@@ -528,6 +562,35 @@ def test_pipeline_skips_unchanged_images(tmp_path: Path) -> None:
         object.__setattr__(settings, "data_dir", old_data_dir)
 
 
+def test_pipeline_regenerates_missing_thumbnail_for_unchanged_image(tmp_path: Path) -> None:
+    old_data_dir = settings.data_dir
+    object.__setattr__(settings, "data_dir", (tmp_path / "data").resolve())
+    try:
+        photo_root = tmp_path / "pipeline-repair"
+        create_photo(photo_root / "one.jpg")
+
+        with make_session(tmp_path) as session:
+            library = LibraryRoot(name="Pipeline Repair", path=str(photo_root.resolve()))
+            session.add(library)
+            session.commit()
+            session.refresh(library)
+
+            scan_library(session, library.id or 0, generate_thumbnails=True)
+            thumbnail = session.exec(select(Thumbnail).where(Thumbnail.size == "small")).one()
+            missing_path = Path(thumbnail.path)
+            missing_path.unlink(missing_ok=True)
+            session.delete(thumbnail)
+            session.commit()
+
+            scan_library(session, library.id or 0, generate_thumbnails=True)
+
+            thumbnails = session.exec(select(Thumbnail)).all()
+            assert len(thumbnails) == 2
+            assert all(Path(item.path).exists() for item in thumbnails)
+    finally:
+        object.__setattr__(settings, "data_dir", old_data_dir)
+
+
 def test_pipeline_no_thumbnails_when_disabled(tmp_path: Path) -> None:
     old_data_dir = settings.data_dir
     object.__setattr__(settings, "data_dir", (tmp_path / "data").resolve())
@@ -549,6 +612,28 @@ def test_pipeline_no_thumbnails_when_disabled(tmp_path: Path) -> None:
         object.__setattr__(settings, "data_dir", old_data_dir)
 
 
+def test_scan_library_records_metadata_error_for_corrupt_image(tmp_path: Path) -> None:
+    photo_root = tmp_path / "corrupt-metadata"
+    bad_photo = photo_root / "bad.jpg"
+    bad_photo.parent.mkdir(parents=True, exist_ok=True)
+    bad_photo.write_bytes(b"not a real jpeg")
+
+    with make_session(tmp_path) as session:
+        library = LibraryRoot(name="Corrupt Metadata", path=str(photo_root.resolve()))
+        session.add(library)
+        session.commit()
+        session.refresh(library)
+
+        total = scan_library(session, library.id or 0)
+
+        assert total == 1
+        asset = session.exec(select(Asset)).one()
+        assert asset.width is None
+        error = session.exec(select(ProcessingError)).one()
+        assert error.error_type == "metadata"
+        assert error.asset_path == "bad.jpg"
+
+
 def test_pipeline_empty_library_no_thumbnails(tmp_path: Path) -> None:
     old_data_dir = settings.data_dir
     object.__setattr__(settings, "data_dir", (tmp_path / "data").resolve())
@@ -568,3 +653,52 @@ def test_pipeline_empty_library_no_thumbnails(tmp_path: Path) -> None:
             assert session.exec(select(Thumbnail)).all() == []
     finally:
         object.__setattr__(settings, "data_dir", old_data_dir)
+
+
+def test_pillow_metadata_extracts_orientation_gps_and_lens(tmp_path: Path) -> None:
+    """Verify Pillow-based metadata extraction covers orientation, GPS, lens, and core EXIF fields."""
+    photo_path = tmp_path / "parity.jpg"
+    create_orientation_exif_photo(photo_path)
+
+    meta = get_image_metadata(photo_path)
+
+    # Core metadata fields
+    assert meta["camera_make"] == "Canon"
+    assert meta["camera_model"] == "EOS R6"
+    assert meta["lens_model"] == "RF24-105mm F4 L IS USM"
+    assert meta["iso"] == 800
+    assert meta["aperture"] == "f/4"
+    assert meta["exposure_time"] == "1/250 s"
+    assert meta["focal_length"] == "105 mm"
+
+    # Captured datetime
+    assert meta["captured_at"] is not None
+    assert meta["captured_at"].year == 2024
+    assert meta["captured_at"].month == 5
+    assert meta["captured_at"].day == 12
+
+    # GPS coordinates
+    assert meta["latitude"] == pytest.approx(37.8083333, abs=1e-6)
+    assert meta["longitude"] == pytest.approx(-122.4041667, abs=1e-6)
+
+    # Orientation: 6 means 90° CW, so width/height should swap
+    assert meta["width"] == 120   # original height
+    assert meta["height"] == 160  # original width
+
+
+def test_exif_metadata_uses_pillow_only_path(tmp_path: Path) -> None:
+    """Ensure get_image_metadata works through the Pillow-only path."""
+    photo_path = tmp_path / "pillow_only.jpg"
+    create_orientation_exif_photo(photo_path)
+
+    meta = get_image_metadata(photo_path)
+
+    assert meta["camera_make"] == "Canon"
+    assert meta["camera_model"] == "EOS R6"
+    assert meta["lens_model"] == "RF24-105mm F4 L IS USM"
+    assert meta["iso"] == 800
+    assert meta["aperture"] == "f/4"
+    assert meta["width"] == 120
+    assert meta["height"] == 160
+    assert meta["latitude"] == pytest.approx(37.8083333, abs=1e-6)
+    assert meta["longitude"] == pytest.approx(-122.4041667, abs=1e-6)

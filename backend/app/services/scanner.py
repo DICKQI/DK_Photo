@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import concurrent.futures
+import itertools
 import logging
 import mimetypes
 import os
+import queue
 import threading
 from dataclasses import dataclass
 from datetime import datetime
@@ -22,12 +24,6 @@ from sqlalchemy import delete as sa_delete
 from sqlalchemy import func
 from sqlmodel import Session, select
 
-try:
-    import exifread as _exifread_lib
-    _HAS_EXIFREAD = True
-except ImportError:
-    _HAS_EXIFREAD = False
-
 logger = logging.getLogger(__name__)
 
 from app.models import Asset, Folder, LibraryRoot, PhotoAlbum, PhotoAlbumAsset, ProcessingError, ScanJob, Thumbnail, utc_now
@@ -42,6 +38,81 @@ BATCH_SIZE = 200
 PROGRESS_INTERVAL = 100
 ACTIVE_SCAN_STATUSES = {"queued", "running"}
 THUMBNAIL_READY_SIZES = ("small", "medium")
+DELETE_CHUNK_SIZE = 900
+THUMBNAIL_PRIORITY = 10
+METADATA_PRIORITY = 0
+
+
+class PriorityExecutor:
+    def __init__(self, max_workers: int) -> None:
+        self._queue: queue.PriorityQueue = queue.PriorityQueue()
+        self._counter = itertools.count()
+        self._shutdown = False
+        self._lock = threading.Lock()
+        self._workers = [
+            threading.Thread(target=self._worker, daemon=True)
+            for _ in range(max(1, max_workers))
+        ]
+        for worker in self._workers:
+            worker.start()
+
+    def submit(self, fn, *args, priority: int = 0, **kwargs) -> concurrent.futures.Future:
+        with self._lock:
+            if self._shutdown:
+                raise RuntimeError("cannot schedule new futures after shutdown")
+            future: concurrent.futures.Future = concurrent.futures.Future()
+            self._queue.put((priority, next(self._counter), future, fn, args, kwargs))
+            return future
+
+    def shutdown(self, wait: bool = True, cancel_futures: bool = False) -> None:
+        with self._lock:
+            if self._shutdown:
+                return
+            self._shutdown = True
+            if cancel_futures:
+                while True:
+                    try:
+                        _priority, _seq, future, _fn, _args, _kwargs = self._queue.get_nowait()
+                    except queue.Empty:
+                        break
+                    if future is not None:
+                        future.cancel()
+                    self._queue.task_done()
+            for _worker in self._workers:
+                self._queue.put((10_000, next(self._counter), None, None, (), {}))
+        if wait:
+            for worker in self._workers:
+                worker.join()
+
+    def _worker(self) -> None:
+        while True:
+            _priority, _seq, future, fn, args, kwargs = self._queue.get()
+            try:
+                if future is None:
+                    return
+                if not future.set_running_or_notify_cancel():
+                    continue
+                try:
+                    future.set_result(fn(*args, **kwargs))
+                except BaseException as exc:
+                    future.set_exception(exc)
+            finally:
+                self._queue.task_done()
+
+
+@dataclass(slots=True)
+class CacheEntry:
+    id: int
+    size: int
+    mtime: float
+
+
+@dataclass(slots=True)
+class _ThumbAsset:
+    id: int
+    path: str
+    mtime: float
+    mime_type: str
 
 
 @dataclass
@@ -142,29 +213,18 @@ GPS_TAGS = {value: key for key, value in ExifTags.GPSTAGS.items()}
 
 def get_image_metadata(path: Path) -> dict[str, Any]:
     metadata = empty_asset_metadata()
-    exif_data: dict[str, Any] = {}
-    orientation: int | None = None
-
-    if _HAS_EXIFREAD:
-        try:
-            with open(path, "rb") as fh:
-                tags = _exifread_lib.process_file(fh, details=False)
-            if tags:
-                exif_data = _parse_exifread_tags(tags)
-                orientation = exif_data.pop("_orientation", None)
-        except Exception:
-            pass
 
     try:
         with Image.open(path) as image:
             raw_width, raw_height = image.size
 
-            if not exif_data:
-                pillow_exif = image.getexif()
-                if pillow_exif:
-                    exif_data = extract_exif_metadata(pillow_exif)
-                    if orientation is None:
-                        orientation = _pillow_orientation(pillow_exif)
+            pillow_exif = image.getexif()
+            if pillow_exif:
+                exif_data = extract_exif_metadata(pillow_exif)
+                metadata.update(exif_data)
+                orientation = _pillow_orientation(pillow_exif)
+            else:
+                orientation = None
 
             if orientation in (5, 6, 7, 8):
                 metadata["width"], metadata["height"] = raw_height, raw_width
@@ -175,7 +235,6 @@ def get_image_metadata(path: Path) -> dict[str, Any]:
         logger.warning("Failed to read image metadata for %s", path, exc_info=True)
         return None
 
-    metadata.update(exif_data)
     return metadata
 
 
@@ -185,155 +244,6 @@ def _pillow_orientation(exif: Image.Exif) -> int | None:
         return None
     value = exif.get(tag_id)
     return parse_exif_int(value)
-
-
-def _parse_exifread_tags(tags: dict) -> dict[str, Any]:
-    result: dict[str, Any] = {}
-
-    def _text(*keys: str) -> str | None:
-        for key in keys:
-            v = _exifread_text(tags, key)
-            if v:
-                return v
-        return None
-
-    def _number(*keys: str) -> int | None:
-        for key in keys:
-            v = _exifread_number(tags, key)
-            if v is not None:
-                return v
-        return None
-
-    def _ratio(*keys: str) -> float | None:
-        for key in keys:
-            v = _exifread_ratio(tags, key)
-            if v is not None:
-                return v
-        return None
-
-    make = _text("Image Make")
-    if make:
-        result["camera_make"] = make
-
-    model = _text("Image Model")
-    if model:
-        result["camera_model"] = model
-
-    lens = _text("EXIF LensModel", "Image LensModel")
-    if lens:
-        result["lens_model"] = lens
-
-    dt_text = _text("EXIF DateTimeOriginal", "Image DateTimeOriginal", "Image DateTime")
-    if dt_text:
-        captured = parse_exif_datetime(dt_text)
-        if captured:
-            result["captured_at"] = captured
-
-    iso_val = _number("EXIF ISOSpeedRatings", "Image ISOSpeedRatings", "EXIF PhotographicSensitivity")
-    if iso_val is not None:
-        iso = parse_exif_int(iso_val)
-        if iso is not None:
-            result["iso"] = iso
-
-    fnumber = _ratio("EXIF FNumber", "Image FNumber")
-    if fnumber is not None:
-        result["aperture"] = format_aperture(fnumber)
-
-    exposure = _ratio("EXIF ExposureTime", "Image ExposureTime")
-    if exposure is not None:
-        result["exposure_time"] = format_exposure_time(exposure)
-
-    focal = _ratio("EXIF FocalLength", "Image FocalLength")
-    if focal is not None:
-        result["focal_length"] = format_focal_length(focal)
-
-    lat, lon = _exifread_gps(tags)
-    if lat is not None:
-        result["latitude"] = lat
-    if lon is not None:
-        result["longitude"] = lon
-
-    orientation = _number("Image Orientation")
-    if orientation is not None:
-        result["_orientation"] = parse_exif_int(orientation)
-
-    return result
-
-
-def _exifread_text(tags: dict, key: str) -> str | None:
-    tag = tags.get(key)
-    if tag is None:
-        return None
-    return clean_exif_text(str(tag))
-
-
-def _exifread_number(tags: dict, key: str) -> int | None:
-    tag = tags.get(key)
-    if tag is None:
-        return None
-    try:
-        values = tag.values
-        if values and len(values) > 0:
-            return int(values[0])
-    except (TypeError, ValueError):
-        pass
-    return None
-
-
-def _exifread_ratio(tags: dict, key: str) -> float | None:
-    tag = tags.get(key)
-    if tag is None:
-        return None
-    try:
-        values = tag.values
-        if values and len(values) > 0:
-            item = values[0]
-            if hasattr(item, "num") and hasattr(item, "den"):
-                return float(Fraction(item.num, item.den))  # type: ignore[arg-type]
-            return float(item)
-    except (TypeError, ValueError, ZeroDivisionError):
-        pass
-    return None
-
-
-def _exifread_gps(tags: dict) -> tuple[float | None, float | None]:
-    lat_ref_tag = tags.get("GPS GPSLatitudeRef")
-    lat_tag = tags.get("GPS GPSLatitude")
-    lon_ref_tag = tags.get("GPS GPSLongitudeRef")
-    lon_tag = tags.get("GPS GPSLongitude")
-
-    latitude = _exifread_gps_coord(lat_tag, str(lat_ref_tag) if lat_ref_tag else "")
-    longitude = _exifread_gps_coord(lon_tag, str(lon_ref_tag) if lon_ref_tag else "")
-    return latitude, longitude
-
-
-def _exifread_gps_coord(
-    coord_tag: object | None,
-    ref: str,
-) -> float | None:
-    if coord_tag is None:
-        return None
-    try:
-        values = coord_tag.values  # type: ignore[union-attr]
-        if not values or len(values) < 3:
-            return None
-
-        def _ratio_to_float(item: Any) -> float | None:
-            if hasattr(item, "num") and hasattr(item, "den"):
-                return float(Fraction(item.num, item.den))  # type: ignore[arg-type]
-            return float(item)
-
-        degrees = _ratio_to_float(values[0])
-        minutes = _ratio_to_float(values[1])
-        seconds = _ratio_to_float(values[2])
-        if degrees is None or minutes is None or seconds is None:
-            return None
-        coord = degrees + minutes / 60 + seconds / 3600
-        if ref.strip().upper() in {"S", "W"}:
-            coord *= -1
-        return round(coord, 7)
-    except Exception:
-        return None
 
 
 def empty_asset_metadata() -> dict[str, Any]:
@@ -514,12 +424,65 @@ def get_or_create_folder(
     return folder
 
 
-def upsert_asset(session: Session, library: LibraryRoot, folder: Folder, media_path: Path, root: Path) -> Asset:
+def _apply_metadata_to_asset(
+    session: Session,
+    library_id: int,
+    entry: CacheEntry | None,
+    folder_id: int,
+    filename: str,
+    rel: str,
+    size: int,
+    mtime: float,
+    mime_type: str,
+    metadata: dict[str, Any],
+) -> Asset:
+    if entry is not None:
+        asset = session.get(Asset, entry.id)
+    else:
+        asset = session.exec(
+            select(Asset).where(Asset.library_id == library_id, Asset.path == rel)
+        ).first()
+
+    if asset:
+        asset.folder_id = folder_id
+        asset.filename = filename
+        asset.mime_type = mime_type
+        asset.size = size
+        asset.mtime = mtime
+        apply_asset_metadata(asset, metadata)
+        asset.updated_at = utc_now()
+    else:
+        asset = Asset(
+            library_id=library_id,
+            folder_id=folder_id,
+            filename=filename,
+            path=rel,
+            mime_type=mime_type,
+            size=size,
+            mtime=mtime,
+            **metadata,
+        )
+        session.add(asset)
+    return asset
+
+
+def upsert_asset(
+    session: Session,
+    library: LibraryRoot,
+    folder: Folder,
+    media_path: Path,
+    root: Path,
+    entry: CacheEntry | None = None,
+) -> Asset:
     rel_path = relative_posix(media_path, root)
     stat = media_path.stat()
     mime_type = mimetypes.guess_type(media_path.name)[0] or "application/octet-stream"
-    asset = session.exec(select(Asset).where(Asset.library_id == library.id, Asset.path == rel_path)).first()
-    needs_metadata = not asset or asset.size != stat.st_size or asset.mtime != stat.st_mtime
+    if entry is not None:
+        asset = session.get(Asset, entry.id)
+        needs_metadata = entry.size != stat.st_size or entry.mtime != stat.st_mtime
+    else:
+        asset = session.exec(select(Asset).where(Asset.library_id == library.id, Asset.path == rel_path)).first()
+        needs_metadata = not asset or asset.size != stat.st_size or asset.mtime != stat.st_mtime
     metadata = {
         "width": asset.width if asset else None,
         "height": asset.height if asset else None,
@@ -582,41 +545,42 @@ def apply_asset_metadata(asset: Asset, metadata: dict[str, Any]) -> None:
         setattr(asset, key, value)
 
 
-def delete_missing_assets(session: Session, library: LibraryRoot, seen_asset_paths: set[str]) -> None:
-    assets = session.exec(select(Asset).where(Asset.library_id == library.id)).all()
-    stale_ids = [a.id for a in assets if a.path not in seen_asset_paths and a.id is not None]
+def _chunks(items: list[int], size: int = DELETE_CHUNK_SIZE):
+    for index in range(0, len(items), size):
+        yield items[index:index + size]
 
+
+def delete_missing_assets(session: Session, library: LibraryRoot, stale_ids: list[int]) -> None:
     if not stale_ids:
         return
 
-    thumbnails = session.exec(select(Thumbnail).where(Thumbnail.asset_id.in_(stale_ids))).all()  # type: ignore[attr-defined]
-    for thumbnail in thumbnails:
-        thumb_path = Path(thumbnail.path)
-        if thumb_path.exists():
-            thumb_path.unlink(missing_ok=True)
+    for chunk in _chunks(stale_ids):
+        thumbnails = session.exec(select(Thumbnail).where(Thumbnail.asset_id.in_(chunk))).all()  # type: ignore[attr-defined]
+        for thumbnail in thumbnails:
+            thumb_path = Path(thumbnail.path)
+            if thumb_path.exists():
+                thumb_path.unlink(missing_ok=True)
 
-    session.exec(sa_delete(Thumbnail).where(Thumbnail.asset_id.in_(stale_ids)))  # type: ignore[attr-defined]
-    session.exec(sa_delete(PhotoAlbumAsset).where(PhotoAlbumAsset.asset_id.in_(stale_ids)))  # type: ignore[attr-defined]
+        session.exec(sa_delete(Thumbnail).where(Thumbnail.asset_id.in_(chunk)))  # type: ignore[attr-defined]
+        session.exec(sa_delete(PhotoAlbumAsset).where(PhotoAlbumAsset.asset_id.in_(chunk)))  # type: ignore[attr-defined]
 
-    cover_albums = session.exec(select(PhotoAlbum).where(PhotoAlbum.cover_asset_id.in_(stale_ids))).all()  # type: ignore[attr-defined]
-    for album in cover_albums:
-        album.cover_asset_id = None
+        cover_albums = session.exec(select(PhotoAlbum).where(PhotoAlbum.cover_asset_id.in_(chunk))).all()  # type: ignore[attr-defined]
+        for album in cover_albums:
+            album.cover_asset_id = None
 
-    cover_folders = session.exec(select(Folder).where(Folder.cover_asset_id.in_(stale_ids))).all()  # type: ignore[attr-defined]
-    for folder in cover_folders:
-        folder.cover_asset_id = None
-    session.flush()
+        cover_folders = session.exec(select(Folder).where(Folder.cover_asset_id.in_(chunk))).all()  # type: ignore[attr-defined]
+        for folder in cover_folders:
+            folder.cover_asset_id = None
+        session.flush()
 
-    session.exec(sa_delete(Asset).where(Asset.id.in_(stale_ids)))  # type: ignore[attr-defined]
-    session.commit()
+        session.exec(sa_delete(Asset).where(Asset.id.in_(chunk)))  # type: ignore[attr-defined]
+        session.commit()
 
 
-def delete_missing_folders(session: Session, library: LibraryRoot, seen_folder_paths: set[str]) -> None:
-    folders = session.exec(select(Folder).where(Folder.library_id == library.id)).all()
-    stale_ids = [f.id for f in folders if f.path not in seen_folder_paths and f.id is not None]
-    if stale_ids:
-        session.exec(sa_delete(Folder).where(Folder.id.in_(stale_ids)))  # type: ignore[attr-defined]
-    session.commit()
+def delete_missing_folders(session: Session, library: LibraryRoot, stale_ids: list[int]) -> None:
+    for chunk in _chunks(stale_ids):
+        session.exec(sa_delete(Folder).where(Folder.id.in_(chunk)))  # type: ignore[attr-defined]
+        session.commit()
 
 
 def refresh_folder_counts(session: Session, library: LibraryRoot) -> None:
@@ -717,15 +681,30 @@ def scan_library(
     if not is_existing_directory:
         return 0
 
-    if job and job.total_estimated is None:
-        estimated = _count_media_files(root)
-        job.total_estimated = estimated.total
-        job.total_estimated_images = estimated.images
-        job.total_estimated_videos = estimated.videos
-        session.add(job)
-        session.commit()
+    # Preload existing assets into a lightweight cache for O(1) lookup.
+    # Pop on visit; entries left behind after the walk are stale.
+    remaining: dict[str, CacheEntry] = {}
+    duplicate_ids: list[int] = []
+    for row in session.exec(
+        select(Asset.id, Asset.path, Asset.size, Asset.mtime)
+        .where(Asset.library_id == library.id)
+    ):
+        asset_id, path_str, size, mtime = row
+        if path_str in remaining:
+            duplicate_ids.append(asset_id)
+            continue
+        remaining[path_str] = CacheEntry(id=asset_id, size=size, mtime=mtime)
 
-    folder_cache: dict[str, Folder] = {}
+    if duplicate_ids:
+        logger.warning(
+            "Found %d duplicate asset paths in library %d. Excess rows will be cleaned up.",
+            len(duplicate_ids), library.id or 0,
+        )
+
+    # Preload existing folders into the lookup cache.
+    folder_cache: dict[str, Folder] = {
+        f.path: f for f in session.exec(select(Folder).where(Folder.library_id == library.id))
+    }
     seen_folder_paths: set[str] = set()
     seen_asset_paths: set[str] = set()
     future_contexts: dict[concurrent.futures.Future, dict] = {}
@@ -733,17 +712,51 @@ def scan_library(
     image_total = 0
     video_total = 0
     thumbnail_ready_images = 0
-    pending_images: list[Asset] = []
+    pending_images: list[Asset | _ThumbAsset] = []
     completed_thumbs: set[tuple[int, str]] = set()
     ready_thumb_sizes: dict[int, set[str]] = {}
     ready_thumb_assets: set[int] = set()
-    executor: concurrent.futures.ThreadPoolExecutor | None = None
+    from app.config import get_thumb_workers
+    worker_budget = get_thumb_workers()
+    executor = PriorityExecutor(max_workers=worker_budget)
     thumb_futures: list[concurrent.futures.Future] = []
+    meta_pending: list[dict] = []
+    MAX_THUMB_OUTSTANDING = worker_budget * 4
+    THUMB_ASSET_CHUNK = max(1, worker_budget * 2)
 
-    if generate_thumbnails:
-        from app.config import get_thumb_workers
-
-        executor = concurrent.futures.ThreadPoolExecutor(max_workers=get_thumb_workers())
+    def flush_thumbnail_work(wait_for_slot: bool = False) -> None:
+        nonlocal thumbnail_ready_images
+        if not generate_thumbnails:
+            return
+        while pending_images and len(thumb_futures) < MAX_THUMB_OUTSTANDING:
+            limit = min(
+                THUMB_ASSET_CHUNK,
+                len(pending_images),
+                max(1, (MAX_THUMB_OUTSTANDING - len(thumb_futures) + 1) // 2),
+            )
+            chunk = pending_images[:limit]
+            del pending_images[:limit]
+            _submit_pending_thumbnails(
+                executor,
+                chunk,
+                library.path,
+                completed_thumbs,
+                thumb_futures,
+                future_contexts,
+            )
+        if thumb_futures:
+            thumbnail_ready_images += _flush_completed_thumbnail_progress(
+                session,
+                thumb_futures,
+                ready_thumb_sizes,
+                ready_thumb_assets,
+                cancel_event,
+                library_id=library.id or 0,
+                job_id=job.id if job else None,
+                future_contexts=future_contexts,
+                wait_for_one=wait_for_slot and len(thumb_futures) >= MAX_THUMB_OUTSTANDING,
+            )
+            _clean_future_contexts(future_contexts, thumb_futures)
 
     try:
         for directory, subdirs, filenames in root.walk():
@@ -758,11 +771,50 @@ def scan_library(
                 media_path = directory / filename
                 if not is_supported_media(media_path):
                     continue
+                rel = relative_posix(media_path, root)
+                is_image = is_supported_image(media_path)
+                is_video = is_supported_video(media_path)
                 try:
-                    asset = upsert_asset(session, library, folder, media_path, root)
+                    entry = remaining.pop(rel, None)
+                    stat = media_path.stat()
+                    mime_type = mimetypes.guess_type(media_path.name)[0] or "application/octet-stream"
+
+                    if entry is not None and entry.size == stat.st_size and entry.mtime == stat.st_mtime:
+                        # Unchanged asset: skip metadata extraction and DB write.
+                        seen_asset_paths.add(rel)
+                        total += 1
+                        if is_image:
+                            image_total += 1
+                            if generate_thumbnails:
+                                pending_images.append(
+                                    _ThumbAsset(id=entry.id, path=rel, mtime=stat.st_mtime, mime_type=mime_type)
+                                )
+                        elif is_video:
+                            video_total += 1
+                        if len(pending_images) >= THUMB_ASSET_CHUNK:
+                            flush_thumbnail_work(wait_for_slot=True)
+                        if job and total % PROGRESS_INTERVAL == 0:
+                            _update_scan_job_progress(
+                                session, job, total, image_total, video_total, thumbnail_ready_images,
+                            )
+                            session.commit()
+                        continue
+
+                    # Changed or new asset: collect for batch metadata extraction.
+                    meta_pending.append({
+                        "entry": entry,
+                        "folder_id": folder.id or 0,
+                        "filename": media_path.name,
+                        "rel": rel,
+                        "size": stat.st_size,
+                        "mtime": stat.st_mtime,
+                        "mime_type": mime_type,
+                        "is_image": is_image,
+                        "media_path": media_path,
+                    })
                 except OSError:
                     logger.warning("Skipping file: %s", media_path)
-                    rel = relative_posix(media_path, root)
+                    remaining.pop(rel, None)
                     seen_asset_paths.add(rel)
                     session.add(
                         ProcessingError(
@@ -776,85 +828,84 @@ def scan_library(
                     )
                     session.commit()
                     continue
-                seen_asset_paths.add(asset.path)
-                total += 1
-                is_image = is_supported_image(media_path)
-                is_video = is_supported_video(media_path)
-                if is_image:
-                    image_total += 1
-                elif is_video:
-                    video_total += 1
 
-                if generate_thumbnails and is_image:
-                    pending_images.append(asset)
-
-                if total % BATCH_SIZE == 0:
-                    session.commit()
-                    if generate_thumbnails and pending_images and executor:
-                        _submit_pending_thumbnails(
-                            executor,
-                            pending_images,
-                            library.path,
-                            completed_thumbs,
-                            thumb_futures,
-                            future_contexts,
-                        )
-                        pending_images.clear()
-
-                if job and total % PROGRESS_INTERVAL == 0:
-                    if generate_thumbnails and executor and thumb_futures:
-                        thumbnail_ready_images += _flush_completed_thumbnail_progress(
-                            session,
-                            thumb_futures,
-                            ready_thumb_sizes,
-                            ready_thumb_assets,
-                            cancel_event,
-                            library_id=library.id or 0,
-                            job_id=job.id if job else None,
-                            future_contexts=future_contexts,
-                        )
-                        _clean_future_contexts(future_contexts, thumb_futures)
-                    _update_scan_job_progress(
-                        session,
-                        job,
-                        total,
-                        image_total,
-                        video_total,
-                        thumbnail_ready_images,
+                if len(meta_pending) >= BATCH_SIZE:
+                    _flush_meta_pending(
+                        executor, meta_pending, session, library.id or 0,
+                        seen_asset_paths, pending_images, generate_thumbnails,
+                        cancel_event, job.id if job else None,
                     )
+                    for ctx in meta_pending:
+                        total += 1
+                        if ctx["is_image"]:
+                            image_total += 1
+                        else:
+                            video_total += 1
+                    meta_pending.clear()
+
+                    flush_thumbnail_work()
+
+                    if job:
+                        _update_scan_job_progress(
+                            session, job, total, image_total, video_total, thumbnail_ready_images,
+                        )
+                    session.commit()
+
+                    # Thumbnail backpressure
+                    if generate_thumbnails:
+                        while len(thumb_futures) >= MAX_THUMB_OUTSTANDING:
+                            flush_thumbnail_work(wait_for_slot=True)
+                            if job:
+                                _update_scan_job_progress(
+                                    session, job, total, image_total, video_total, thumbnail_ready_images,
+                                )
+                                session.commit()
+
+        # Flush remaining meta_pending after walk completes.
+        if meta_pending:
+            _flush_meta_pending(
+                executor, meta_pending, session, library.id or 0,
+                seen_asset_paths, pending_images, generate_thumbnails,
+                cancel_event, job.id if job else None,
+            )
+            for ctx in meta_pending:
+                total += 1
+                if ctx["is_image"]:
+                    image_total += 1
+                else:
+                    video_total += 1
+            meta_pending.clear()
 
         session.commit()
 
-        if generate_thumbnails and pending_images and executor:
-            _submit_pending_thumbnails(
-                executor,
-                pending_images,
-                library.path,
-                completed_thumbs,
-                thumb_futures,
-                future_contexts,
-            )
-            pending_images.clear()
+        if generate_thumbnails:
+            while pending_images or thumb_futures:
+                flush_thumbnail_work(wait_for_slot=True)
+                if not pending_images and thumb_futures:
+                    thumbnail_ready_images += _flush_completed_thumbnail_progress(
+                        session,
+                        thumb_futures,
+                        ready_thumb_sizes,
+                        ready_thumb_assets,
+                        cancel_event,
+                        wait=True,
+                        library_id=library.id or 0,
+                        job_id=job.id if job else None,
+                        future_contexts=future_contexts,
+                    )
+                    _clean_future_contexts(future_contexts, thumb_futures)
+                    thumb_futures.clear()
 
-        if generate_thumbnails and executor:
-            thumbnail_ready_images += _flush_completed_thumbnail_progress(
-                session,
-                thumb_futures,
-                ready_thumb_sizes,
-                ready_thumb_assets,
-                cancel_event,
-                wait=True,
-                library_id=library.id or 0,
-                job_id=job.id if job else None,
-                future_contexts=future_contexts,
+        if job:
+            _update_scan_job_progress(
+                session, job, total, image_total, video_total, thumbnail_ready_images,
             )
-            _clean_future_contexts(future_contexts, thumb_futures)
-            thumb_futures.clear()
+            session.commit()
 
     except ScanCancelled:
         session.commit()
 
-        if generate_thumbnails and executor:
+        if generate_thumbnails:
             thumbnail_ready_images += _flush_completed_thumbnail_progress(
                 session,
                 thumb_futures,
@@ -880,27 +931,23 @@ def scan_library(
 
         return total
     finally:
-        if executor:
-            executor.shutdown(wait=False)
+        executor.shutdown(wait=False)
 
-    if job:
-        _update_scan_job_progress(
-            session,
-            job,
-            total,
-            image_total,
-            video_total,
-            thumbnail_ready_images,
-        )
+    stale_asset_ids = [e.id for e in remaining.values()] + duplicate_ids
+    delete_missing_assets(session, library, stale_asset_ids)
 
-    delete_missing_assets(session, library, seen_asset_paths)
-    delete_missing_folders(session, library, seen_folder_paths)
+    stale_folder_ids: list[int] = []
+    for f in folder_cache.values():
+        if f.path not in seen_folder_paths and f.id is not None:
+            stale_folder_ids.append(f.id)
+    delete_missing_folders(session, library, stale_folder_ids)
     refresh_folder_counts(session, library)
     library.last_scan_at = utc_now()
     session.commit()
 
     if job:
         if generate_thumbnails and image_total > 0:
+            job.thumbnail_ready_images = thumbnail_ready_images
             job.message = f"Indexed {total} media items, {thumbnail_ready_images} thumbnail-ready images"
         else:
             job.message = f"Indexed {total} media items"
@@ -910,9 +957,90 @@ def scan_library(
     return total
 
 
+def _flush_meta_pending(
+    executor: PriorityExecutor,
+    contexts: list[dict],
+    session: Session,
+    library_id: int,
+    seen_asset_paths: set[str],
+    pending_images: list[Asset | _ThumbAsset],
+    generate_thumbnails: bool,
+    cancel_event: threading.Event | None = None,
+    job_id: int | None = None,
+) -> None:
+    if not contexts:
+        return
+    futures_to_index: dict[concurrent.futures.Future, int] = {}
+    metadata_by_index: dict[int, dict[str, Any]] = {}
+    for index, ctx in enumerate(contexts):
+        if ctx["is_image"]:
+            fut = executor.submit(get_image_metadata, ctx["media_path"], priority=METADATA_PRIORITY)
+            futures_to_index[fut] = index
+        else:
+            metadata_by_index[index] = empty_asset_metadata()
+
+    for fut in concurrent.futures.as_completed(futures_to_index):
+        index = futures_to_index[fut]
+        ctx = contexts[index]
+        try:
+            metadata = fut.result()
+        except Exception:
+            metadata = None
+        if metadata is None:
+            session.add(
+                ProcessingError(
+                    library_id=library_id,
+                    scan_job_id=job_id,
+                    asset_path=ctx["rel"],
+                    filename=ctx["filename"],
+                    error_type="metadata",
+                    error_message=f"无法读取图片元数据：{ctx['filename']}",
+                )
+            )
+            metadata = empty_asset_metadata()
+        metadata_by_index[index] = metadata
+
+    for index, ctx in enumerate(contexts):
+        _apply_metadata_context(
+            session,
+            library_id,
+            ctx,
+            metadata_by_index[index],
+            seen_asset_paths,
+            pending_images,
+            generate_thumbnails,
+        )
+
+
+def _apply_metadata_context(
+    session: Session,
+    library_id: int,
+    ctx: dict,
+    metadata: dict[str, Any],
+    seen_asset_paths: set[str],
+    pending_images: list[Asset | _ThumbAsset],
+    generate_thumbnails: bool,
+) -> None:
+    asset = _apply_metadata_to_asset(
+        session,
+        library_id,
+        ctx["entry"],
+        ctx["folder_id"],
+        ctx["filename"],
+        ctx["rel"],
+        ctx["size"],
+        ctx["mtime"],
+        ctx["mime_type"],
+        metadata,
+    )
+    seen_asset_paths.add(asset.path)
+    if generate_thumbnails and ctx["is_image"]:
+        pending_images.append(asset)
+
+
 def _submit_pending_thumbnails(
-    executor: concurrent.futures.ThreadPoolExecutor,
-    pending: list[Asset],
+    executor: PriorityExecutor,
+    pending: list[Asset | _ThumbAsset],
     library_path: str,
     completed: set[tuple[int, str]],
     futures_out: list[concurrent.futures.Future],
@@ -934,6 +1062,7 @@ def _submit_pending_thumbnails(
                 mtime=asset.mtime,
                 mime_type=asset.mime_type,
                 size=size,
+                priority=THUMBNAIL_PRIORITY,
             )
             futures_out.append(future)
             if future_contexts is not None:
@@ -957,7 +1086,6 @@ def _update_scan_job_progress(
     job.processed_videos = videos
     job.thumbnail_ready_images = thumbnail_ready_images
     session.add(job)
-    session.commit()
 
 
 def _flush_completed_thumbnail_progress(
@@ -970,8 +1098,9 @@ def _flush_completed_thumbnail_progress(
     library_id: int | None = None,
     job_id: int | None = None,
     future_contexts: dict[concurrent.futures.Future, dict] | None = None,
+    wait_for_one: bool = False,
 ) -> int:
-    results = _collect_thumbnail_results(futures, cancel_event, wait, future_contexts)
+    results = _collect_thumbnail_results(futures, cancel_event, wait, future_contexts, wait_for_one)
     if not results:
         return 0
 
@@ -1017,8 +1146,32 @@ def _collect_thumbnail_results(
     cancel_event: threading.Event | None,
     wait: bool,
     future_contexts: dict[concurrent.futures.Future, dict] | None = None,
+    wait_for_one: bool = False,
 ) -> list[dict]:
     results: list[dict] = []
+    if wait_for_one and futures:
+        done, pending_set = concurrent.futures.wait(
+            list(futures),
+            return_when=concurrent.futures.FIRST_COMPLETED,
+        )
+        for future in done:
+            _check_cancelled(cancel_event)
+            result = _thumbnail_future_result(future)
+            if result is None and future_contexts:
+                ctx = future_contexts.get(future)
+                if ctx:
+                    result = {
+                        "error": True,
+                        "asset_id": ctx["asset_id"],
+                        "size": ctx["size"],
+                        "asset_path": ctx["asset_path"],
+                        "message": "缩略图生成异常：后台任务执行失败",
+                    }
+            if result:
+                results.append(result)
+        futures[:] = list(pending_set)
+        return results
+
     if wait:
         for future in concurrent.futures.as_completed(list(futures)):
             _check_cancelled(cancel_event)
