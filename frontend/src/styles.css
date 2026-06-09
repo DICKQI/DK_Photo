@@ -764,8 +764,8 @@ select:focus {
 .management-nav-link.active,
 .management-nav-sidebar .management-nav-link.active {
   border-color: transparent;
-  background: #c8efd9;
-  color: #172033;
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 .management-nav-sheet {
@@ -5472,8 +5472,8 @@ select:focus {
 
 :root[data-theme="dark"] .management-nav-link.active,
 :root[data-theme="dark"] .management-nav-sidebar .management-nav-link.active {
-  background: rgba(74, 222, 128, 0.2);
-  color: #dcfce7;
+  background: var(--accent-soft);
+  color: #cfe0ff;
 }
 
 :root[data-theme="dark"] .thumbnail-stat-list span,
