@@ -110,6 +110,24 @@ def run_lightweight_migrations() -> None:
     if "file_size" not in thumbnail_columns:
         with engine.begin() as connection:
             connection.execute(text("ALTER TABLE thumbnail ADD COLUMN file_size INTEGER"))
+    processingerror_columns = {column["name"] for column in inspector.get_columns("processingerror")} if inspector.has_table("processingerror") else set()
+    if not processingerror_columns:
+        with engine.begin() as connection:
+            connection.execute(text("""
+                CREATE TABLE IF NOT EXISTS processingerror (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    scan_job_id INTEGER,
+                    library_id INTEGER NOT NULL,
+                    asset_path VARCHAR NOT NULL DEFAULT '',
+                    filename VARCHAR NOT NULL DEFAULT '',
+                    error_type VARCHAR NOT NULL,
+                    error_message VARCHAR NOT NULL DEFAULT '',
+                    created_at DATETIME NOT NULL
+                )
+            """))
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_processingerror_error_type ON processingerror(error_type)"))
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_processingerror_library_id ON processingerror(library_id)"))
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_processingerror_scan_job_id ON processingerror(scan_job_id)"))
 
 
 def get_session() -> Generator[Session, None, None]:

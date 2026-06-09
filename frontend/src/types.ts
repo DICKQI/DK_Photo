@@ -213,3 +213,21 @@ export interface FilesystemChildren {
   image_count: number;
   media_count?: number;
 }
+
+export interface ProcessingError {
+  id: number;
+  scan_job_id: number | null;
+  library_id: number;
+  library_name: string | null;
+  asset_path: string;
+  filename: string;
+  error_type: string;
+  error_message: string;
+  created_at: string;
+}
+
+export interface ProcessingErrorStats {
+  by_type: Record<string, number>;
+  by_library: Record<string, number>;
+  total: number;
+}

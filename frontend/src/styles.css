@@ -3185,6 +3185,151 @@ select:focus {
   padding-top: 4px;
 }
 
+.error-log-panel {
+  margin-top: 1.5rem;
+}
+
+.error-summary-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.error-summary-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.error-summary-chip.thumbnail {
+  background: rgba(239, 68, 68, 0.1);
+  color: #dc2626;
+}
+
+.error-summary-chip.metadata {
+  background: rgba(245, 158, 11, 0.1);
+  color: #d97706;
+}
+
+.error-summary-chip.file_access {
+  background: rgba(59, 130, 246, 0.1);
+  color: #2563eb;
+}
+
+.error-filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.compact-select {
+  min-width: 120px;
+  padding: 4px 24px 4px 8px;
+  font-size: 0.82rem;
+}
+
+.compact-search {
+  flex: 1;
+  max-width: 300px;
+}
+
+.error-table-wrap {
+  background: var(--bg-secondary, #f1f5f9);
+  border: 1px solid var(--border-color, #dce3ee);
+  border-radius: 8px;
+  overflow-x: auto;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.error-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+}
+
+.error-table thead {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.error-table th {
+  background: var(--bg-secondary, #f1f5f9);
+  padding: 8px 12px;
+  text-align: left;
+  font-weight: 600;
+  color: var(--text-secondary, #64748b);
+  font-size: 0.78rem;
+  border-bottom: 1px solid var(--border-color, #dce3ee);
+  white-space: nowrap;
+}
+
+.error-table td {
+  padding: 6px 12px;
+  border-bottom: 1px solid rgba(128, 128, 128, 0.1);
+  white-space: nowrap;
+}
+
+.cell-file {
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cell-msg {
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-secondary, #64748b);
+}
+
+.cell-time {
+  color: var(--text-secondary, #64748b);
+  font-size: 0.78rem;
+}
+
+.error-badge {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.error-badge.thumbnail {
+  background: rgba(239, 68, 68, 0.12);
+  color: #dc2626;
+}
+
+.error-badge.metadata {
+  background: rgba(245, 158, 11, 0.12);
+  color: #b45309;
+}
+
+.error-badge.file_access {
+  background: rgba(59, 130, 246, 0.12);
+  color: #1d4ed8;
+}
+
+.error-row-thumbnail:hover {
+  background: rgba(239, 68, 68, 0.04);
+}
+
+.error-row-metadata:hover {
+  background: rgba(245, 158, 11, 0.04);
+}
+
+.error-row-file_access:hover {
+  background: rgba(59, 130, 246, 0.04);
+}
+
 .panel-note,
 .modal-subtitle {
   display: block;
@@ -6885,6 +7030,67 @@ select:focus {
   color: #e5edf8;
   border-color: var(--border);
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23e5edf8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+}
+
+:root[data-theme="dark"] .error-table-wrap {
+  background: rgba(13, 17, 26, 0.4);
+  border-color: var(--border);
+}
+
+:root[data-theme="dark"] .error-table th {
+  background: rgba(13, 17, 26, 0.6);
+}
+
+:root[data-theme="dark"] .error-table td {
+  border-color: rgba(255, 255, 255, 0.06);
+}
+
+:root[data-theme="dark"] .error-summary-chip.thumbnail {
+  background: rgba(239, 68, 68, 0.15);
+}
+
+:root[data-theme="dark"] .error-summary-chip.metadata {
+  background: rgba(245, 158, 11, 0.15);
+}
+
+:root[data-theme="dark"] .error-summary-chip.file_access {
+  background: rgba(59, 130, 246, 0.15);
+}
+
+:root[data-theme="dark"] .error-badge.thumbnail {
+  color: #fca5a5;
+}
+
+:root[data-theme="dark"] .error-badge.metadata {
+  color: #fcd34d;
+}
+
+:root[data-theme="dark"] .error-badge.file_access {
+  color: #93c5fd;
+}
+
+:root[data-theme="dark"] .error-row-thumbnail:hover {
+  background: rgba(239, 68, 68, 0.08);
+}
+
+:root[data-theme="dark"] .error-row-metadata:hover {
+  background: rgba(245, 158, 11, 0.08);
+}
+
+:root[data-theme="dark"] .error-row-file_access:hover {
+  background: rgba(59, 130, 246, 0.08);
+}
+
+:root[data-theme="dark"] .cell-msg {
+  color: #94a3b8;
+}
+
+:root[data-theme="dark"] .cell-time {
+  color: #94a3b8;
+}
+
+:root[data-theme="dark"] .cell-library {
+  color: #cbd5e1;
 }
 
 /* ── Global scan indicator ── */

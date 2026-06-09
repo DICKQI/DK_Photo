@@ -30,7 +30,7 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-from app.models import Asset, Folder, LibraryRoot, PhotoAlbum, PhotoAlbumAsset, ScanJob, Thumbnail, utc_now
+from app.models import Asset, Folder, LibraryRoot, PhotoAlbum, PhotoAlbumAsset, ProcessingError, ScanJob, Thumbnail, utc_now
 from app.services.paths import is_docker_photos_root
 
 
@@ -172,8 +172,8 @@ def get_image_metadata(path: Path) -> dict[str, Any]:
                 metadata["width"], metadata["height"] = raw_width, raw_height
 
     except Exception:
-        logger.debug("Failed to read image metadata for %s", path, exc_info=True)
-        return metadata
+        logger.warning("Failed to read image metadata for %s", path, exc_info=True)
+        return None
 
     metadata.update(exif_data)
     return metadata
@@ -535,7 +535,24 @@ def upsert_asset(session: Session, library: LibraryRoot, folder: Folder, media_p
         "longitude": asset.longitude if asset else None,
     }
     if needs_metadata:
-        metadata = get_image_metadata(media_path) if is_supported_image(media_path) else empty_asset_metadata()
+        if is_supported_image(media_path):
+            img_meta = get_image_metadata(media_path)
+            if img_meta is None:
+                metadata = empty_asset_metadata()
+                session.add(
+                    ProcessingError(
+                        library_id=library.id or 0,
+                        asset_path=rel_path,
+                        filename=media_path.name,
+                        error_type="metadata",
+                        error_message=f"无法读取图片元数据：{media_path.name}",
+                    )
+                )
+                session.commit()
+            else:
+                metadata = img_meta
+        else:
+            metadata = empty_asset_metadata()
 
     if asset:
         asset.folder_id = folder.id or 0
@@ -711,6 +728,7 @@ def scan_library(
     folder_cache: dict[str, Folder] = {}
     seen_folder_paths: set[str] = set()
     seen_asset_paths: set[str] = set()
+    future_contexts: dict[concurrent.futures.Future, dict] = {}
     total = 0
     image_total = 0
     video_total = 0
@@ -744,7 +762,19 @@ def scan_library(
                     asset = upsert_asset(session, library, folder, media_path, root)
                 except OSError:
                     logger.warning("Skipping file: %s", media_path)
-                    seen_asset_paths.add(relative_posix(media_path, root))
+                    rel = relative_posix(media_path, root)
+                    seen_asset_paths.add(rel)
+                    session.add(
+                        ProcessingError(
+                            library_id=library.id or 0,
+                            scan_job_id=job.id if job else None,
+                            asset_path=rel,
+                            filename=media_path.name,
+                            error_type="file_access",
+                            error_message=f"无法访问文件：{media_path}",
+                        )
+                    )
+                    session.commit()
                     continue
                 seen_asset_paths.add(asset.path)
                 total += 1
@@ -767,6 +797,7 @@ def scan_library(
                             library.path,
                             completed_thumbs,
                             thumb_futures,
+                            future_contexts,
                         )
                         pending_images.clear()
 
@@ -778,7 +809,11 @@ def scan_library(
                             ready_thumb_sizes,
                             ready_thumb_assets,
                             cancel_event,
+                            library_id=library.id or 0,
+                            job_id=job.id if job else None,
+                            future_contexts=future_contexts,
                         )
+                        _clean_future_contexts(future_contexts, thumb_futures)
                     _update_scan_job_progress(
                         session,
                         job,
@@ -797,6 +832,7 @@ def scan_library(
                 library.path,
                 completed_thumbs,
                 thumb_futures,
+                future_contexts,
             )
             pending_images.clear()
 
@@ -808,7 +844,11 @@ def scan_library(
                 ready_thumb_assets,
                 cancel_event,
                 wait=True,
+                library_id=library.id or 0,
+                job_id=job.id if job else None,
+                future_contexts=future_contexts,
             )
+            _clean_future_contexts(future_contexts, thumb_futures)
             thumb_futures.clear()
 
     except ScanCancelled:
@@ -821,6 +861,9 @@ def scan_library(
                 ready_thumb_sizes,
                 ready_thumb_assets,
                 None,
+                library_id=library.id or 0,
+                job_id=job.id if job else None,
+                future_contexts=future_contexts,
             )
             executor.shutdown(wait=False, cancel_futures=True)
 
@@ -873,6 +916,7 @@ def _submit_pending_thumbnails(
     library_path: str,
     completed: set[tuple[int, str]],
     futures_out: list[concurrent.futures.Future],
+    future_contexts: dict[concurrent.futures.Future, dict] | None = None,
 ) -> None:
     from app.services.thumbnails import generate_thumbnail_disk_only
 
@@ -892,6 +936,12 @@ def _submit_pending_thumbnails(
                 size=size,
             )
             futures_out.append(future)
+            if future_contexts is not None:
+                future_contexts[future] = {
+                    "asset_id": asset.id or 0,
+                    "asset_path": asset.path,
+                    "size": size,
+                }
 
 
 def _update_scan_job_progress(
@@ -917,16 +967,39 @@ def _flush_completed_thumbnail_progress(
     ready_assets: set[int],
     cancel_event: threading.Event | None,
     wait: bool = False,
+    library_id: int | None = None,
+    job_id: int | None = None,
+    future_contexts: dict[concurrent.futures.Future, dict] | None = None,
 ) -> int:
-    results = _collect_thumbnail_results(futures, cancel_event, wait)
+    results = _collect_thumbnail_results(futures, cancel_event, wait, future_contexts)
     if not results:
         return 0
 
     from app.services.thumbnails import flush_thumbnails
 
-    flush_thumbnails(session, results)
+    successes = [r for r in results if not r.get("error")]
+    errors = [r for r in results if r.get("error")]
+
+    if errors and library_id is not None:
+        for err in errors:
+            asset_path = err.get("asset_path", "")
+            session.add(
+                ProcessingError(
+                    library_id=library_id,
+                    scan_job_id=job_id,
+                    asset_path=asset_path,
+                    filename=Path(asset_path).name if asset_path else "",
+                    error_type="thumbnail",
+                    error_message=str(err.get("message", "缩略图生成失败")),
+                )
+            )
+        session.commit()
+
+    if successes:
+        flush_thumbnails(session, successes)
+
     newly_ready = 0
-    for result in results:
+    for result in successes:
         asset_id = result.get("asset_id")
         size = result.get("size")
         if not isinstance(asset_id, int) or size not in THUMBNAIL_READY_SIZES:
@@ -943,12 +1016,23 @@ def _collect_thumbnail_results(
     futures: list[concurrent.futures.Future],
     cancel_event: threading.Event | None,
     wait: bool,
+    future_contexts: dict[concurrent.futures.Future, dict] | None = None,
 ) -> list[dict]:
     results: list[dict] = []
     if wait:
         for future in concurrent.futures.as_completed(list(futures)):
             _check_cancelled(cancel_event)
             result = _thumbnail_future_result(future)
+            if result is None and future_contexts:
+                ctx = future_contexts.get(future)
+                if ctx:
+                    result = {
+                        "error": True,
+                        "asset_id": ctx["asset_id"],
+                        "size": ctx["size"],
+                        "asset_path": ctx["asset_path"],
+                        "message": "缩略图生成异常：后台任务执行失败",
+                    }
             if result:
                 results.append(result)
         futures.clear()
@@ -961,6 +1045,16 @@ def _collect_thumbnail_results(
             continue
         _check_cancelled(cancel_event)
         result = _thumbnail_future_result(future)
+        if result is None and future_contexts:
+            ctx = future_contexts.get(future)
+            if ctx:
+                result = {
+                    "error": True,
+                    "asset_id": ctx["asset_id"],
+                    "size": ctx["size"],
+                    "asset_path": ctx["asset_path"],
+                    "message": "缩略图生成异常：后台任务执行失败",
+                }
         if result:
             results.append(result)
     futures[:] = pending
@@ -971,8 +1065,19 @@ def _thumbnail_future_result(future: concurrent.futures.Future) -> dict | None:
     try:
         result = future.result()
     except Exception:
+        logger.warning("Thumbnail future raised unexpected exception", exc_info=True)
         return None
     return result if isinstance(result, dict) else None
+
+
+def _clean_future_contexts(
+    contexts: dict[concurrent.futures.Future, dict],
+    kept_futures: list[concurrent.futures.Future],
+) -> None:
+    kept = set(kept_futures)
+    for future in list(contexts):
+        if future not in kept:
+            del contexts[future]
 
 
 def run_scan_job(session: Session, job_id: int, generate_thumbnails: bool = False) -> None:

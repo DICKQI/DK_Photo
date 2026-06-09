@@ -336,10 +336,22 @@ def generate_thumbnail_disk_only(
     else:
         original_path = safe_asset_path(library_path, asset_path)
         if not original_path.exists():
-            return None
+            return {
+                "error": True,
+                "asset_id": asset_id,
+                "size": size,
+                "asset_path": asset_path,
+                "message": "原文件不存在",
+            }
         dims = _generate_thumbnail_file(original_path, output_path, max_size)
         if dims is None:
-            return None
+            return {
+                "error": True,
+                "asset_id": asset_id,
+                "size": size,
+                "asset_path": asset_path,
+                "message": "缩略图生成失败：图片文件可能已损坏或格式不支持",
+            }
         width, height = dims
 
     return {

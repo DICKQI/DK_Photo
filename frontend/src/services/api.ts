@@ -13,6 +13,8 @@ import type {
   LibraryPermission,
   LogEntry,
   PhotoAlbum,
+  ProcessingError,
+  ProcessingErrorStats,
   PublicShare,
   ScanJob,
   ServerSettings,
@@ -115,6 +117,22 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify(payload),
     });
+  },
+  processingErrors(params?: { library_id?: number; error_type?: string; search?: string; limit?: number; offset?: number }) {
+    const search = new URLSearchParams();
+    if (params?.library_id) search.set('library_id', String(params.library_id));
+    if (params?.error_type) search.set('error_type', params.error_type);
+    if (params?.search) search.set('search', params.search);
+    if (params?.limit) search.set('limit', String(params.limit));
+    if (params?.offset) search.set('offset', String(params.offset));
+    const qs = search.toString();
+    return request<ProcessingError[]>(`/api/admin/processing-errors${qs ? `?${qs}` : ''}`);
+  },
+  processingErrorStats() {
+    return request<ProcessingErrorStats>('/api/admin/processing-errors/stats');
+  },
+  clearProcessingErrors() {
+    return request<{ ok: boolean }>('/api/admin/processing-errors', { method: 'DELETE' });
   },
   users() {
     return request<User[]>('/api/admin/users');

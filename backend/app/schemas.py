@@ -332,3 +332,21 @@ class ServerSettingsRead(BaseModel):
 
 class ServerSettingsUpdate(BaseModel):
     thumb_workers: int = Field(ge=1, le=64)
+
+
+class ProcessingErrorRead(BaseModel):
+    id: int
+    scan_job_id: Optional[int] = None
+    library_id: int
+    library_name: Optional[str] = None
+    asset_path: str
+    filename: str
+    error_type: str
+    error_message: str
+    created_at: datetime
+
+
+class ProcessingErrorStats(BaseModel):
+    by_type: dict[str, int]
+    by_library: dict[str, int]
+    total: int

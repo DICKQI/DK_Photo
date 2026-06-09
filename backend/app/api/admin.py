@@ -6,9 +6,9 @@ import json as _json
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, status
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request, status
 from starlette.responses import StreamingResponse
-from sqlalchemy import func, or_
+from sqlalchemy import delete, func, or_
 from sqlmodel import Session, select
 
 from app.config import get_thumb_workers, reset_thumb_workers, set_thumb_workers, settings
@@ -23,6 +23,7 @@ from app.models import (
     LibraryRoot,
     PhotoAlbum,
     PhotoAlbumAsset,
+    ProcessingError,
     ScanJob,
     ShareAsset,
     ShareLink,
@@ -39,6 +40,8 @@ from app.schemas import (
     LibraryRead,
     LibraryUpdate,
     PasswordReset,
+    ProcessingErrorRead,
+    ProcessingErrorStats,
     ScanJobRead,
     ServerSettingsRead,
     ServerSettingsUpdate,
@@ -223,6 +226,8 @@ def _delete_library_cleanup(library_id: int) -> None:
             cleanup_session.delete(perm)
         for job in cleanup_session.exec(select(ScanJob).where(ScanJob.library_id == library_id)).all():
             cleanup_session.delete(job)
+        for err in cleanup_session.exec(select(ProcessingError).where(ProcessingError.library_id == library_id)).all():
+            cleanup_session.delete(err)
         for asset in assets:
             cleanup_session.delete(asset)
         for folder in folders:
@@ -786,4 +791,73 @@ async def log_stream(_: AdminUser):
 @router.delete("/settings/thumb-workers-reset")
 def reset_thumb_workers_endpoint(_: AdminUser) -> dict[str, bool]:
     reset_thumb_workers()
+    return {"ok": True}
+
+
+@router.get("/processing-errors", response_model=list[ProcessingErrorRead])
+def list_processing_errors(
+    session: SessionDep,
+    _: AdminUser,
+    library_id: int | None = None,
+    error_type: str | None = None,
+    search: str | None = None,
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+) -> list[dict]:
+    stmt = (
+        select(ProcessingError, LibraryRoot.name)
+        .join(LibraryRoot, ProcessingError.library_id == LibraryRoot.id, isouter=True)
+    )
+    if library_id is not None:
+        stmt = stmt.where(ProcessingError.library_id == library_id)
+    if error_type:
+        stmt = stmt.where(ProcessingError.error_type == error_type)
+    if search:
+        stmt = stmt.where(
+            or_(
+                ProcessingError.filename.contains(search),
+                ProcessingError.asset_path.contains(search),
+            )
+        )
+    stmt = stmt.order_by(ProcessingError.created_at.desc()).offset(offset).limit(limit)
+    rows = session.exec(stmt).all()
+    return [
+        {
+            "id": err.id,
+            "scan_job_id": err.scan_job_id,
+            "library_id": err.library_id,
+            "library_name": lib_name,
+            "asset_path": err.asset_path,
+            "filename": err.filename,
+            "error_type": err.error_type,
+            "error_message": err.error_message,
+            "created_at": err.created_at,
+        }
+        for err, lib_name in rows
+    ]
+
+
+@router.get("/processing-errors/stats", response_model=ProcessingErrorStats)
+def processing_errors_stats(session: SessionDep, _: AdminUser) -> ProcessingErrorStats:
+    rows = session.exec(
+        select(ProcessingError.error_type, func.count()).group_by(ProcessingError.error_type)
+    ).all()
+    by_type = {etype: cnt for etype, cnt in rows}
+
+    lib_rows = session.exec(
+        select(LibraryRoot.name, func.count(ProcessingError.id))
+        .join(ProcessingError, ProcessingError.library_id == LibraryRoot.id)
+        .group_by(LibraryRoot.name)
+    ).all()
+    by_library = {name: cnt for name, cnt in lib_rows}
+
+    total = session.exec(select(func.count()).select_from(ProcessingError)).one()
+
+    return ProcessingErrorStats(by_type=by_type, by_library=by_library, total=total)
+
+
+@router.delete("/processing-errors")
+def clear_processing_errors(session: SessionDep, _: AdminUser) -> dict[str, bool]:
+    session.exec(delete(ProcessingError))
+    session.commit()
     return {"ok": True}

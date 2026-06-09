@@ -185,3 +185,14 @@ class ScanJob(SQLModel, table=True):
     thumbnail_ready_images: int = Field(default=0)
     started_at: Optional[datetime] = Field(default=None, sa_type=UTCDateTime)
     finished_at: Optional[datetime] = Field(default=None, sa_type=UTCDateTime)
+
+
+class ProcessingError(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    scan_job_id: Optional[int] = Field(default=None, foreign_key="scanjob.id", index=True)
+    library_id: int = Field(foreign_key="libraryroot.id", index=True)
+    asset_path: str = ""
+    filename: str = ""
+    error_type: str = Field(index=True)
+    error_message: str = ""
+    created_at: datetime = Field(default_factory=utc_now, sa_type=UTCDateTime)

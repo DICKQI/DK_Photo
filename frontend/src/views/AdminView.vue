@@ -349,6 +349,89 @@
         </div>
       </article>
       <LogViewer v-if="activeModule === 'settings'" />
+      <article v-if="activeModule === 'settings'" class="admin-panel settings-panel error-log-panel">
+        <header>
+          <div>
+            <h2>{{ t('admin.errorLogTitle') }}</h2>
+            <p class="panel-note">{{ t('admin.errorLogNote') }}</p>
+          </div>
+          <button
+            class="danger-button"
+            :disabled="isBusy(errorClearKey) || !processingErrorStats.total"
+            @click="clearAllErrors"
+          >
+            <LoaderCircle v-if="isBusy(errorClearKey)" class="spin" :size="17" />
+            <Trash2 v-else :size="17" />
+            {{ isBusy(errorClearKey) ? t('admin.errorClearing') : t('admin.errorClear') }}
+          </button>
+        </header>
+
+        <div v-if="processingErrorsLoading" class="panel-empty">
+          <LoaderCircle class="spin" :size="24" />
+          <strong>{{ t('admin.loadingAccess') }}</strong>
+        </div>
+
+        <template v-else-if="processingErrorStats.total > 0">
+          <div class="error-summary-row">
+            <span class="error-summary-chip thumbnail">
+              <AlertTriangle :size="14" />
+              {{ t('admin.errorTypeThumbnail') }}: {{ processingErrorStats.by_type.thumbnail || 0 }}
+            </span>
+            <span class="error-summary-chip metadata">
+              <AlertTriangle :size="14" />
+              {{ t('admin.errorTypeMetadata') }}: {{ processingErrorStats.by_type.metadata || 0 }}
+            </span>
+            <span class="error-summary-chip file_access">
+              <AlertTriangle :size="14" />
+              {{ t('admin.errorTypeFileAccess') }}: {{ processingErrorStats.by_type.file_access || 0 }}
+            </span>
+          </div>
+
+          <div class="error-filter-bar">
+            <select v-model="errorTypeFilter" class="settings-select compact-select">
+              <option value="">{{ t('admin.errorFilterAll') }}</option>
+              <option value="thumbnail">{{ t('admin.errorTypeThumbnail') }}</option>
+              <option value="metadata">{{ t('admin.errorTypeMetadata') }}</option>
+              <option value="file_access">{{ t('admin.errorTypeFileAccess') }}</option>
+            </select>
+            <label class="search-input compact-search">
+              <Search :size="16" />
+              <input v-model="errorSearchText" :placeholder="t('admin.errorSearchPlaceholder')" />
+            </label>
+          </div>
+
+          <div class="error-table-wrap">
+            <table class="error-table">
+              <thead>
+                <tr>
+                  <th>{{ t('common.libraries') }}</th>
+                  <th>{{ t('album.folderName') }}</th>
+                  <th>{{ t('viewer.type') }}</th>
+                  <th>{{ t('album.noAlbumDescription') }}</th>
+                  <th class="col-time">{{ t('common.sortDate') }}</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="err in filteredErrors" :key="err.id" :class="`error-row-${err.error_type}`">
+                  <td class="cell-library">{{ err.library_name || `#${err.library_id}` }}</td>
+                  <td class="cell-file" :title="err.asset_path">{{ err.filename }}</td>
+                  <td class="cell-type">
+                    <span class="error-badge" :class="err.error_type">{{ errorTypeLabel(err.error_type) }}</span>
+                  </td>
+                  <td class="cell-msg">{{ err.error_message }}</td>
+                  <td class="cell-time">{{ formatErrorTime(err.created_at) }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </template>
+
+        <div v-else class="panel-empty">
+          <Bug :size="24" />
+          <strong>{{ t('admin.noErrors') }}</strong>
+          <span>{{ t('admin.noErrorsHint') }}</span>
+        </div>
+      </article>
       </div>
 
       <div v-if="activeModule === 'libraries' || activeModule === 'tools'" class="admin-grid-row admin-monitor-grid single-panel-row">
@@ -690,7 +773,9 @@
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import {
+  AlertTriangle,
   Ban,
+  Bug,
   CircleAlert,
   CircleCheck,
   Copy,
@@ -726,7 +811,7 @@ import { useLocale } from '../composables/useLocale';
 import { useTheme } from '../composables/useTheme';
 import { api } from '../services/api';
 import GlobalScanIndicator from '../components/GlobalScanIndicator.vue';
-import type { Library, LibraryPermission, ScanJob, ServerSettings, ShareLink, ThumbnailStats, User } from '../types';
+import type { Library, LibraryPermission, ProcessingError, ProcessingErrorStats, ScanJob, ServerSettings, ShareLink, ThumbnailStats, User } from '../types';
 
 const libraries = ref<Library[]>([]);
 const route = useRoute();
@@ -739,6 +824,12 @@ const thumbnailStats = ref<ThumbnailStats>({ total_count: 0, total_size_bytes: 0
 const serverSettings = ref<ServerSettings | null>(null);
 const serverSettingsError = ref('');
 const settingsLoading = ref(false);
+const processingErrors = ref<ProcessingError[]>([]);
+const processingErrorStats = ref<ProcessingErrorStats>({ by_type: {}, by_library: {}, total: 0 });
+const processingErrorsLoading = ref(false);
+const errorTypeFilter = ref('');
+const errorSearchText = ref('');
+const errorClearKey = 'error-clear';
 const settingsEditBuffer = reactive({ thumb_workers: 0 });
 const libraryName = ref('Family Photos');
 const libraryPath = ref('');
@@ -876,6 +967,25 @@ watch(
   { immediate: true },
 );
 
+watch(
+  () => [activeModule.value, errorTypeFilter.value],
+  () => {
+    if (activeModule.value === 'settings') {
+      loadProcessingErrors();
+    }
+  },
+);
+
+let searchDebounce: ReturnType<typeof setTimeout> | null = null;
+watch(errorSearchText, () => {
+  if (searchDebounce) clearTimeout(searchDebounce);
+  searchDebounce = setTimeout(() => {
+    if (activeModule.value === 'settings') {
+      loadProcessingErrors();
+    }
+  }, 300);
+});
+
 onUnmounted(stopJobPolling);
 
 async function refreshAll() {
@@ -896,6 +1006,7 @@ async function loadAdminData() {
   shares.value = await api.adminShares();
   thumbnailStats.value = await api.thumbnailStats();
   await loadServerSettings();
+  await loadProcessingErrors();
   syncLibraryEditBuffer();
   syncEditBuffer();
 }
@@ -1562,6 +1673,51 @@ async function loadServerSettings() {
     settingsLoading.value = false;
   }
 }
+
+async function loadProcessingErrors() {
+  processingErrorsLoading.value = true;
+  try {
+    const params: { library_id?: number; error_type?: string; search?: string; limit: number } = { limit: 200 };
+    if (errorTypeFilter.value) params.error_type = errorTypeFilter.value;
+    const q = errorSearchText.value.trim();
+    if (q) params.search = q;
+    processingErrors.value = await api.processingErrors(params);
+    processingErrorStats.value = await api.processingErrorStats();
+  } catch {
+    // non-critical
+  } finally {
+    processingErrorsLoading.value = false;
+  }
+}
+
+async function clearAllErrors() {
+  startBusy(errorClearKey);
+  try {
+    await api.clearProcessingErrors();
+    processingErrors.value = [];
+    processingErrorStats.value = { by_type: {}, by_library: {}, total: 0 };
+    showMessage(t('admin.errorCleared'));
+  } catch (err) {
+    showMessage(errorMessage(err, t('admin.unableRefresh')), 'error');
+  } finally {
+    stopBusy(errorClearKey);
+  }
+}
+
+function errorTypeLabel(type: string) {
+  if (type === 'thumbnail') return t('admin.errorTypeThumbnail');
+  if (type === 'metadata') return t('admin.errorTypeMetadata');
+  if (type === 'file_access') return t('admin.errorTypeFileAccess');
+  return type;
+}
+
+function formatErrorTime(ts: string) {
+  const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) return ts;
+  return d.toLocaleString();
+}
+
+const filteredErrors = computed(() => processingErrors.value);
 
 async function saveServerSettings() {
   startBusy(settingsSaveKey);
