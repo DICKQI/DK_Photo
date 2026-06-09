@@ -5,9 +5,11 @@ from typing import Optional
 
 from sqlmodel import Field, Index, SQLModel, UniqueConstraint
 
+from app.types import UTCDateTime
+
 
 def utc_now() -> datetime:
-    return datetime.now(timezone.utc).replace(tzinfo=None)
+    return datetime.now(timezone.utc)
 
 
 class User(SQLModel, table=True):
@@ -18,8 +20,8 @@ class User(SQLModel, table=True):
     password_hash: str
     is_active: bool = Field(default=True)
     token_version: int = Field(default=0)
-    deleted_at: Optional[datetime] = Field(default=None, index=True)
-    created_at: datetime = Field(default_factory=utc_now)
+    deleted_at: Optional[datetime] = Field(default=None, index=True, sa_type=UTCDateTime)
+    created_at: datetime = Field(default_factory=utc_now, sa_type=UTCDateTime)
 
 
 class LibraryPermission(SQLModel, table=True):
@@ -30,7 +32,7 @@ class LibraryPermission(SQLModel, table=True):
     library_id: int = Field(foreign_key="libraryroot.id", index=True)
     can_view: bool = Field(default=True)
     can_share: bool = Field(default=False)
-    created_at: datetime = Field(default_factory=utc_now)
+    created_at: datetime = Field(default_factory=utc_now, sa_type=UTCDateTime)
 
 
 class LibraryRoot(SQLModel, table=True):
@@ -39,9 +41,9 @@ class LibraryRoot(SQLModel, table=True):
     path: str = Field(index=True, unique=True)
     is_enabled: bool = Field(default=True, index=True)
     watch_enabled: bool = Field(default=False)
-    created_at: datetime = Field(default_factory=utc_now)
-    last_scan_at: Optional[datetime] = None
-    deleted_at: Optional[datetime] = Field(default=None, index=True)
+    created_at: datetime = Field(default_factory=utc_now, sa_type=UTCDateTime)
+    last_scan_at: Optional[datetime] = Field(default=None, sa_type=UTCDateTime)
+    deleted_at: Optional[datetime] = Field(default=None, index=True, sa_type=UTCDateTime)
 
 
 class Folder(SQLModel, table=True):
@@ -53,7 +55,7 @@ class Folder(SQLModel, table=True):
     photo_count: int = Field(default=0)
     folder_count: int = Field(default=0)
     cover_asset_id: Optional[int] = Field(default=None, foreign_key="asset.id")
-    updated_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now, sa_type=UTCDateTime)
 
 
 class Asset(SQLModel, table=True):
@@ -73,7 +75,7 @@ class Asset(SQLModel, table=True):
     height: Optional[int] = None
     size: int = 0
     mtime: float = Field(index=True)
-    captured_at: Optional[datetime] = None
+    captured_at: Optional[datetime] = Field(default=None, sa_type=UTCDateTime)
     camera_make: Optional[str] = None
     camera_model: Optional[str] = None
     lens_model: Optional[str] = None
@@ -83,8 +85,8 @@ class Asset(SQLModel, table=True):
     focal_length: Optional[str] = None
     latitude: Optional[float] = None
     longitude: Optional[float] = None
-    created_at: datetime = Field(default_factory=utc_now)
-    updated_at: datetime = Field(default_factory=utc_now)
+    created_at: datetime = Field(default_factory=utc_now, sa_type=UTCDateTime)
+    updated_at: datetime = Field(default_factory=utc_now, sa_type=UTCDateTime)
 
 
 class AssetFavorite(SQLModel, table=True):
@@ -93,7 +95,7 @@ class AssetFavorite(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     user_id: int = Field(foreign_key="user.id", index=True)
     asset_id: int = Field(foreign_key="asset.id", index=True)
-    created_at: datetime = Field(default_factory=utc_now)
+    created_at: datetime = Field(default_factory=utc_now, sa_type=UTCDateTime)
 
 
 class AssetTag(SQLModel, table=True):
@@ -103,7 +105,7 @@ class AssetTag(SQLModel, table=True):
     user_id: int = Field(foreign_key="user.id", index=True)
     asset_id: int = Field(foreign_key="asset.id", index=True)
     name: str = Field(index=True)
-    created_at: datetime = Field(default_factory=utc_now)
+    created_at: datetime = Field(default_factory=utc_now, sa_type=UTCDateTime)
 
 
 class AssetMetadata(SQLModel, table=True):
@@ -114,7 +116,7 @@ class AssetMetadata(SQLModel, table=True):
     asset_id: int = Field(foreign_key="asset.id", index=True)
     description: str = ""
     rating: int = Field(default=0, index=True)
-    updated_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now, sa_type=UTCDateTime)
 
 
 class PhotoAlbum(SQLModel, table=True):
@@ -123,8 +125,8 @@ class PhotoAlbum(SQLModel, table=True):
     name: str
     description: str = ""
     cover_asset_id: Optional[int] = Field(default=None, foreign_key="asset.id")
-    created_at: datetime = Field(default_factory=utc_now)
-    updated_at: datetime = Field(default_factory=utc_now)
+    created_at: datetime = Field(default_factory=utc_now, sa_type=UTCDateTime)
+    updated_at: datetime = Field(default_factory=utc_now, sa_type=UTCDateTime)
 
 
 class PhotoAlbumAsset(SQLModel, table=True):
@@ -133,7 +135,7 @@ class PhotoAlbumAsset(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     album_id: int = Field(foreign_key="photoalbum.id", index=True)
     asset_id: int = Field(foreign_key="asset.id", index=True)
-    added_at: datetime = Field(default_factory=utc_now)
+    added_at: datetime = Field(default_factory=utc_now, sa_type=UTCDateTime)
 
 
 class Thumbnail(SQLModel, table=True):
@@ -144,7 +146,7 @@ class Thumbnail(SQLModel, table=True):
     width: int
     height: int
     file_size: Optional[int] = Field(default=None)
-    created_at: datetime = Field(default_factory=utc_now)
+    created_at: datetime = Field(default_factory=utc_now, sa_type=UTCDateTime)
 
 
 class ShareLink(SQLModel, table=True):
@@ -155,9 +157,9 @@ class ShareLink(SQLModel, table=True):
     password_hash: Optional[str] = None
     asset_id: Optional[int] = Field(default=None, foreign_key="asset.id", index=True)
     folder_id: Optional[int] = Field(default=None, foreign_key="folder.id", index=True)
-    expires_at: Optional[datetime] = Field(default=None, index=True)
-    revoked_at: Optional[datetime] = Field(default=None, index=True)
-    created_at: datetime = Field(default_factory=utc_now)
+    expires_at: Optional[datetime] = Field(default=None, index=True, sa_type=UTCDateTime)
+    revoked_at: Optional[datetime] = Field(default=None, index=True, sa_type=UTCDateTime)
+    created_at: datetime = Field(default_factory=utc_now, sa_type=UTCDateTime)
 
 
 class ShareAsset(SQLModel, table=True):
@@ -176,5 +178,5 @@ class ScanJob(SQLModel, table=True):
     total_assets: int = 0
     total_estimated: Optional[int] = Field(default=None)
     processed_assets: int = Field(default=0)
-    started_at: Optional[datetime] = None
-    finished_at: Optional[datetime] = None
+    started_at: Optional[datetime] = Field(default=None, sa_type=UTCDateTime)
+    finished_at: Optional[datetime] = Field(default=None, sa_type=UTCDateTime)
