@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import concurrent.futures
+import logging
 import mimetypes
 import os
 import threading
@@ -10,8 +11,7 @@ from fractions import Fraction
 from pathlib import Path
 from typing import Any
 
-from PIL import ExifTags, Image, UnidentifiedImageError
-from PIL.Image import DecompressionBombError
+from PIL import ExifTags, Image
 
 _max_pixels_env = os.getenv("DK_PHOTO_MAX_IMAGE_PIXELS", "")
 if _max_pixels_env:
@@ -27,6 +27,8 @@ try:
     _HAS_EXIFREAD = True
 except ImportError:
     _HAS_EXIFREAD = False
+
+logger = logging.getLogger(__name__)
 
 from app.models import Asset, Folder, LibraryRoot, PhotoAlbum, PhotoAlbumAsset, ScanJob, Thumbnail, utc_now
 from app.services.paths import is_docker_photos_root
@@ -169,7 +171,8 @@ def get_image_metadata(path: Path) -> dict[str, Any]:
             else:
                 metadata["width"], metadata["height"] = raw_width, raw_height
 
-    except (OSError, UnidentifiedImageError, DecompressionBombError):
+    except Exception:
+        logger.debug("Failed to read image metadata for %s", path, exc_info=True)
         return metadata
 
     metadata.update(exif_data)
@@ -737,7 +740,12 @@ def scan_library(
                 media_path = directory / filename
                 if not is_supported_media(media_path):
                     continue
-                asset = upsert_asset(session, library, folder, media_path, root)
+                try:
+                    asset = upsert_asset(session, library, folder, media_path, root)
+                except OSError:
+                    logger.warning("Skipping file: %s", media_path)
+                    seen_asset_paths.add(relative_posix(media_path, root))
+                    continue
                 seen_asset_paths.add(asset.path)
                 total += 1
                 is_image = is_supported_image(media_path)
@@ -1003,9 +1011,11 @@ def run_scan_job(session: Session, job_id: int, generate_thumbnails: bool = Fals
     except ScanCancelled:
         return
     except Exception as exc:  # pragma: no cover - defensive status reporting
+        session.rollback()
         job.status = "failed"
         job.message = str(exc)
         job.finished_at = utc_now()
+        session.add(job)
         session.commit()
         raise
     finally:
