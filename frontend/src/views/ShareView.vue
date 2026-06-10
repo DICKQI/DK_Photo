@@ -131,7 +131,7 @@
         >
           <button class="photo-open" @click="openViewer(index)">
             <span class="photo-thumb" :class="{ portrait: isPortraitAsset(asset) }">
-              <img :src="publicThumbnailUrl(token, asset.id, shareThumbnailSize)" :alt="asset.filename" loading="lazy" />
+              <img :src="publicThumbnailUrl(token, asset.id, shareThumbnailSize, asset.mtime)" :alt="asset.filename" loading="lazy" />
               <span v-if="isVideoAsset(asset)" class="photo-media-badge" :title="t('album.videoAsset')">
                 <Play :size="14" fill="currentColor" />
               </span>
@@ -301,7 +301,7 @@ function publicOriginalFor(asset: Asset) {
 }
 
 function publicThumbnailFor(asset: Asset, size: string) {
-  return publicThumbnailUrl(token, asset.id, size);
+  return publicThumbnailUrl(token, asset.id, size, asset.mtime);
 }
 
 function isVideoAsset(asset: Asset) {

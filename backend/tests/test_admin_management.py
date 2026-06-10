@@ -1156,6 +1156,34 @@ def test_asset_download_returns_originals_zip(tmp_path: Path) -> None:
     app.dependency_overrides.clear()
 
 
+def test_thumbnail_responses_require_cache_revalidation(tmp_path: Path) -> None:
+    old_data_dir = settings.data_dir
+    object.__setattr__(settings, "data_dir", (tmp_path / "data").resolve())
+    photo_root = tmp_path / "thumbnail-cache"
+    create_photo(photo_root / "one.jpg")
+
+    client, test_engine = isolated_client(tmp_path)
+    try:
+        with client:
+            login(client, "admin@example.com", "change-me-now")
+            library = client.post("/api/admin/libraries", json={"name": "Thumbnail Cache", "path": str(photo_root)}).json()
+            with Session(test_engine) as session:
+                scan_library(session, library["id"])
+
+            asset_id = client.get("/api/assets").json()[0]["id"]
+            private_thumbnail = client.get(f"/api/assets/{asset_id}/thumbnail?size=small")
+            assert private_thumbnail.status_code == 200, private_thumbnail.text
+            assert private_thumbnail.headers["cache-control"] == "private, no-cache"
+
+            share = client.post("/api/shares", json={"asset_id": asset_id, "title": "Thumbnail Cache"}).json()
+            public_thumbnail = client.get(f"/api/public/shares/{share['token']}/assets/{asset_id}/thumbnail?size=small")
+            assert public_thumbnail.status_code == 200, public_thumbnail.text
+            assert public_thumbnail.headers["cache-control"] == "private, no-cache"
+    finally:
+        object.__setattr__(settings, "data_dir", old_data_dir)
+        app.dependency_overrides.clear()
+
+
 def test_share_links_include_scope_metadata(tmp_path: Path) -> None:
     photo_root = tmp_path / "share-scope"
     create_photo(photo_root / "one.jpg")

@@ -30,7 +30,7 @@ from app.schemas import (
 from app.services.operation_log import log_operation
 from app.services.paths import safe_asset_path
 from app.services.permissions import accessible_library_ids, require_asset_access
-from app.services.thumbnails import ensure_thumbnail
+from app.services.thumbnails import THUMBNAIL_CACHE_CONTROL, ensure_thumbnail
 
 
 router = APIRouter(prefix="/api/assets", tags=["assets"])
@@ -687,7 +687,7 @@ def get_thumbnail(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found")
     require_asset_access(session, current_user, asset)
     thumbnail = ensure_thumbnail(session, asset, size)
-    return FileResponse(thumbnail, media_type="image/webp", headers={"Cache-Control": "private, max-age=31536000, immutable"})
+    return FileResponse(thumbnail, media_type="image/webp", headers={"Cache-Control": THUMBNAIL_CACHE_CONTROL})
 
 
 def current_user_favorite_asset_ids(session: SessionDep, current_user: CurrentUser) -> set[int]:

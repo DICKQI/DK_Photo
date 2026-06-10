@@ -406,16 +406,28 @@ export function logHistoryUrl(params?: { limit?: number; cursor?: string; level?
   return `/api/admin/logs/history${qs ? `?${qs}` : ''}`;
 }
 
-export function thumbnailUrl(assetId: number, size = 'medium') {
-  return `/api/assets/${assetId}/thumbnail?size=${size}`;
+const THUMBNAIL_CACHE_BUSTER = 'v2';
+
+function thumbnailQuery(size: string, version?: number | string | null) {
+  const params = new URLSearchParams();
+  params.set('size', size);
+  params.set('cache', THUMBNAIL_CACHE_BUSTER);
+  if (version !== undefined && version !== null) {
+    params.set('v', String(version));
+  }
+  return params.toString();
+}
+
+export function thumbnailUrl(assetId: number, size = 'medium', version?: number | string | null) {
+  return `/api/assets/${assetId}/thumbnail?${thumbnailQuery(size, version)}`;
 }
 
 export function originalUrl(assetId: number) {
   return `/api/assets/${assetId}/original`;
 }
 
-export function publicThumbnailUrl(token: string, assetId: number, size = 'medium') {
-  return `/api/public/shares/${token}/assets/${assetId}/thumbnail?size=${size}`;
+export function publicThumbnailUrl(token: string, assetId: number, size = 'medium', version?: number | string | null) {
+  return `/api/public/shares/${token}/assets/${assetId}/thumbnail?${thumbnailQuery(size, version)}`;
 }
 
 export function publicOriginalUrl(token: string, assetId: number) {

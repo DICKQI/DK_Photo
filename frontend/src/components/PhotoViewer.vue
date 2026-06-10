@@ -975,7 +975,7 @@ function assetOriginalUrl(asset: Asset) {
 }
 
 function assetThumbnailUrl(asset: Asset, size: string) {
-  return props.thumbnailUrlFor?.(asset, size) ?? thumbnailUrl(asset.id, size);
+  return props.thumbnailUrlFor?.(asset, size) ?? thumbnailUrl(asset.id, size, asset.mtime);
 }
 
 function assetImageSize(asset: Asset) {

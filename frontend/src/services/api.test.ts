@@ -30,12 +30,14 @@ describe('api url helpers', () => {
   });
 
   it('builds authenticated asset urls', () => {
-    expect(thumbnailUrl(42, 'small')).toBe('/api/assets/42/thumbnail?size=small');
+    expect(thumbnailUrl(42, 'small')).toBe('/api/assets/42/thumbnail?size=small&cache=v2');
+    expect(thumbnailUrl(42, 'small', 123.4)).toBe('/api/assets/42/thumbnail?size=small&cache=v2&v=123.4');
     expect(originalUrl(42)).toBe('/api/assets/42/original');
   });
 
   it('builds public share asset urls', () => {
-    expect(publicThumbnailUrl('token', 7, 'large')).toBe('/api/public/shares/token/assets/7/thumbnail?size=large');
+    expect(publicThumbnailUrl('token', 7, 'large')).toBe('/api/public/shares/token/assets/7/thumbnail?size=large&cache=v2');
+    expect(publicThumbnailUrl('token', 7, 'large', 456)).toBe('/api/public/shares/token/assets/7/thumbnail?size=large&cache=v2&v=456');
     expect(publicOriginalUrl('token', 7)).toBe('/api/public/shares/token/assets/7/original');
     expect(publicShareDownloadUrl('token')).toBe('/api/public/shares/token/download');
   });

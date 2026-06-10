@@ -19,7 +19,7 @@ from app.security import hash_password, verify_password
 from app.services.operation_log import log_operation
 from app.services.paths import safe_asset_path
 from app.services.permissions import can_access_library, require_asset_access, require_folder_access
-from app.services.thumbnails import ensure_thumbnail
+from app.services.thumbnails import THUMBNAIL_CACHE_CONTROL, ensure_thumbnail
 
 
 router = APIRouter(tags=["shares"])
@@ -356,7 +356,7 @@ def get_public_thumbnail(
     if not asset or not _share_contains_asset(session, share, asset):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found in share")
     thumbnail = ensure_thumbnail(session, asset, size)
-    return FileResponse(thumbnail, media_type="image/webp", headers={"Cache-Control": "private, max-age=31536000, immutable"})
+    return FileResponse(thumbnail, media_type="image/webp", headers={"Cache-Control": THUMBNAIL_CACHE_CONTROL})
 
 
 def _share_contains_asset(session: SessionDep, share: ShareLink, asset: Asset) -> bool:

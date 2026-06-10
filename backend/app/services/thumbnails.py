@@ -27,6 +27,7 @@ THUMBNAIL_SIZES: dict[str, tuple[int, int]] = {
     "medium": (720, 720),
     "large": (1440, 1440),
 }
+THUMBNAIL_CACHE_CONTROL = "private, no-cache"
 
 
 def _format_bytes(value: int) -> str:

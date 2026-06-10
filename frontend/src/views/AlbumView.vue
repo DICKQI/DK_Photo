@@ -786,7 +786,7 @@
           <template v-if="selectionMode">
             <button class="photo-select-overlay" @click="toggleAssetSelection(asset.id, index, $event)">
               <span class="photo-thumb" :class="{ portrait: isPortraitAsset(asset) }">
-                <img :src="thumbnailUrl(asset.id, thumbSize)" :alt="asset.filename" loading="lazy" decoding="async" />
+                <img :src="thumbnailUrl(asset.id, thumbSize, asset.mtime)" :alt="asset.filename" loading="lazy" decoding="async" />
                 <span v-if="isVideoAsset(asset)" class="photo-media-badge" :title="t('album.videoAsset')">
                   <Play :size="14" fill="currentColor" />
                 </span>
@@ -812,7 +812,7 @@
           <template v-else>
             <button class="photo-open" @click="openViewer(index)">
               <span class="photo-thumb" :class="{ portrait: isPortraitAsset(asset) }">
-                <img :src="thumbnailUrl(asset.id, thumbSize)" :alt="asset.filename" loading="lazy" decoding="async" />
+                <img :src="thumbnailUrl(asset.id, thumbSize, asset.mtime)" :alt="asset.filename" loading="lazy" decoding="async" />
                 <span v-if="isVideoAsset(asset)" class="photo-media-badge" :title="t('album.videoAsset')">
                   <Play :size="14" fill="currentColor" />
                 </span>
@@ -1284,7 +1284,7 @@
               @click="toggleAlbumPickerAsset(asset.id)"
             >
               <span class="asset-picker-thumb" :class="{ portrait: isPortraitAsset(asset) }">
-                <img :src="thumbnailUrl(asset.id, 'small')" :alt="asset.filename" loading="lazy" />
+                <img :src="thumbnailUrl(asset.id, 'small', asset.mtime)" :alt="asset.filename" loading="lazy" />
                 <span v-if="isVideoAsset(asset)" class="photo-media-badge" :title="t('album.videoAsset')">
                   <Play :size="14" fill="currentColor" />
                 </span>
@@ -1486,7 +1486,7 @@
                 type="button"
                 @click="selectCover(asset.id)"
               >
-                <img :src="thumbnailUrl(asset.id, 'small')" :alt="asset.filename" loading="lazy" decoding="async" />
+                <img :src="thumbnailUrl(asset.id, 'small', asset.mtime)" :alt="asset.filename" loading="lazy" decoding="async" />
                 <span class="cover-picker-item-name">{{ asset.filename }}</span>
                 <span v-if="asset.id === coverPickerFolder.cover_asset_id" class="current-cover-badge">
                   {{ t('album.currentCover') }}
@@ -1804,7 +1804,7 @@
                 class="search-result-item"
                 @click="showSearchOverlay = false; openViewer(index)"
               >
-                <img :src="thumbnailUrl(asset.id, 'small')" :alt="asset.filename" loading="lazy" />
+                <img :src="thumbnailUrl(asset.id, 'small', asset.mtime)" :alt="asset.filename" loading="lazy" />
                 <span>
                   <strong>{{ asset.filename }}</strong>
                   <small>{{ assetDateLabel(asset) }} / {{ formatBytes(asset.size) }}</small>
