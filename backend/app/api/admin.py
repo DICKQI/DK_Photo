@@ -763,29 +763,65 @@ def update_settings(payload: ServerSettingsUpdate, _: AdminUser) -> ServerSettin
     )
 
 
+def _sse_event(data: dict, event: str | None = None, event_id: int | None = None) -> str:
+    lines: list[str] = []
+    if event:
+        lines.append(f"event: {event}")
+    if event_id is not None:
+        lines.append(f"id: {event_id}")
+    payload = _json.dumps(data, ensure_ascii=False, separators=(",", ":"))
+    for line in payload.splitlines() or [""]:
+        lines.append(f"data: {line}")
+    return "\n".join(lines) + "\n\n"
+
+
+async def _log_stream_events(queue: asyncio.Queue, tail: int, after: int | None):
+    last_sent_id = after or 0
+    try:
+        yield _sse_event({"connected": True}, event="ready")
+        for entry in logger.get_recent(tail=tail, after=after):
+            if entry.id <= last_sent_id:
+                continue
+            yield _sse_event(entry.model_dump(), event_id=entry.id)
+            last_sent_id = entry.id
+        while True:
+            while not queue.empty():
+                entry = queue.get_nowait()
+                if entry.id <= last_sent_id:
+                    continue
+                yield _sse_event(entry.model_dump(), event_id=entry.id)
+                last_sent_id = entry.id
+            try:
+                entry = await asyncio.wait_for(queue.get(), timeout=10.0)
+                if entry.id <= last_sent_id:
+                    continue
+                yield _sse_event(entry.model_dump(), event_id=entry.id)
+                last_sent_id = entry.id
+            except asyncio.TimeoutError:
+                yield ": heartbeat\n\n"
+            except Exception:
+                break
+    finally:
+        logger.unsubscribe(queue)
+
+
 @router.get("/logs/stream")
-async def log_stream(_: AdminUser):
+async def log_stream(
+    _: AdminUser,
+    tail: int = Query(default=200, ge=0, le=500),
+    after: int | None = Query(default=None, ge=0),
+):
     queue = logger.subscribe()
 
-    async def generate():
-        try:
-            for entry in logger.get_recent():
-                yield f"data: {_json.dumps(entry.model_dump())}\n\n"
-            while True:
-                while not queue.empty():
-                    entry = queue.get_nowait()
-                    yield f"data: {_json.dumps(entry.model_dump())}\n\n"
-                try:
-                    entry = await asyncio.wait_for(queue.get(), timeout=30.0)
-                    yield f"data: {_json.dumps(entry.model_dump())}\n\n"
-                except asyncio.TimeoutError:
-                    yield ": heartbeat\n\n"
-                except Exception:
-                    break
-        finally:
-            logger.unsubscribe(queue)
-
-    return StreamingResponse(generate(), media_type="text/event-stream")
+    return StreamingResponse(
+        _log_stream_events(queue, tail=tail, after=after),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.delete("/settings/thumb-workers-reset")

@@ -1,11 +1,17 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { api, originalUrl, publicOriginalUrl, publicShareDownloadUrl, publicThumbnailUrl, thumbnailUrl } from './api';
+import { api, logStreamUrl, originalUrl, publicOriginalUrl, publicShareDownloadUrl, publicThumbnailUrl, thumbnailUrl } from './api';
 
 afterEach(() => {
   vi.unstubAllGlobals();
 });
 
 describe('api url helpers', () => {
+  it('builds log stream urls', () => {
+    expect(logStreamUrl()).toBe('/api/admin/logs/stream');
+    expect(logStreamUrl({ tail: 50 })).toBe('/api/admin/logs/stream?tail=50');
+    expect(logStreamUrl({ tail: 0, after: 42 })).toBe('/api/admin/logs/stream?tail=0&after=42');
+  });
+
   it('builds authenticated asset urls', () => {
     expect(thumbnailUrl(42, 'small')).toBe('/api/assets/42/thumbnail?size=small');
     expect(originalUrl(42)).toBe('/api/assets/42/original');

@@ -147,6 +147,7 @@ export interface ServerSettings {
 }
 
 export interface LogEntry {
+  id: number;
   timestamp: string;
   level: string;
   logger: string;

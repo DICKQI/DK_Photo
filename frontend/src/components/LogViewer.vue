@@ -59,21 +59,15 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { AlertCircle, LoaderCircle, Search, Trash2 } from 'lucide-vue-next';
 import { useLocale } from '../composables/useLocale';
-import { logStreamUrl } from '../services/api';
-import type { LogEntry } from '../types';
+import { useLogStream } from '../composables/useLogStream';
 
 const { t } = useLocale();
 
-const MAX_ENTRIES = 2000;
-
-const logs = ref<LogEntry[]>([]);
-const connected = ref(false);
+const { logs, connected, connect, disconnect, clearLogs } = useLogStream();
 const autoScroll = ref(true);
 const levelFilter = ref('ALL');
 const searchText = ref('');
 const logContainer = ref<HTMLElement | null>(null);
-
-let eventSource: EventSource | null = null;
 
 const filteredLogs = computed(() => {
   let result = logs.value;
@@ -91,13 +85,6 @@ const filteredLogs = computed(() => {
   return result;
 });
 
-function appendEntry(entry: LogEntry) {
-  logs.value.push(entry);
-  if (logs.value.length > MAX_ENTRIES) {
-    logs.value.splice(0, logs.value.length - MAX_ENTRIES);
-  }
-}
-
 function scrollToBottom() {
   if (!autoScroll.value) return;
   nextTick(() => {
@@ -108,46 +95,16 @@ function scrollToBottom() {
   });
 }
 
-function connectStream() {
-  if (eventSource) {
-    eventSource.close();
-  }
-  eventSource = new EventSource(logStreamUrl(), { withCredentials: true });
-  eventSource.onopen = () => {
-    connected.value = true;
-  };
-  eventSource.onmessage = (event) => {
-    try {
-      const entry: LogEntry = JSON.parse(event.data);
-      appendEntry(entry);
-      scrollToBottom();
-    } catch {
-      // ignore malformed entries
-    }
-  };
-  eventSource.onerror = () => {
-    connected.value = false;
-    eventSource?.close();
-    eventSource = null;
-    setTimeout(connectStream, 3000);
-  };
-}
-
-function clearLogs() {
-  logs.value = [];
-}
-
 watch(() => logs.value.length, () => {
   scrollToBottom();
 });
 
 onMounted(() => {
-  connectStream();
+  connect();
 });
 
 onBeforeUnmount(() => {
-  eventSource?.close();
-  eventSource = null;
+  disconnect();
 });
 </script>
 

@@ -318,6 +318,7 @@ class ThumbnailStats(BaseModel):
 
 
 class LogEntry(BaseModel):
+    id: int
     timestamp: str
     level: str
     logger: str

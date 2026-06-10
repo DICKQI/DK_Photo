@@ -383,8 +383,12 @@ export const api = {
   },
 };
 
-export function logStreamUrl() {
-  return '/api/admin/logs/stream';
+export function logStreamUrl(params?: { tail?: number; after?: number }) {
+  const search = new URLSearchParams();
+  if (params?.tail !== undefined) search.set('tail', String(params.tail));
+  if (params?.after !== undefined) search.set('after', String(params.after));
+  const qs = search.toString();
+  return `/api/admin/logs/stream${qs ? `?${qs}` : ''}`;
 }
 
 export function thumbnailUrl(assetId: number, size = 'medium') {
