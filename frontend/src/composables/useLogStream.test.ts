@@ -42,6 +42,13 @@ class FakeEventSource {
 beforeEach(() => {
   FakeEventSource.instances = [];
   vi.stubGlobal('EventSource', FakeEventSource);
+  vi.stubGlobal(
+    'fetch',
+    vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ items: [], next_cursor: null }),
+    }),
+  );
 });
 
 afterEach(() => {
@@ -50,10 +57,32 @@ afterEach(() => {
 });
 
 describe('useLogStream', () => {
-  it('marks the stream connected as soon as ready arrives', () => {
+  it('loads history before opening the real-time stream', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        items: [
+          { id: 2, timestamp: 't2', level: 'INFO', logger: 'tests', message: 'newer' },
+          { id: 1, timestamp: 't1', level: 'INFO', logger: 'tests', message: 'older' },
+        ],
+        next_cursor: null,
+      }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
     const stream = useLogStream({ retryDelaysMs: [500], maxEntries: 3 });
 
-    stream.connect();
+    await stream.connect();
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/admin/logs/history?limit=200', expect.objectContaining({ credentials: 'include' }));
+    expect(stream.loadingHistory.value).toBe(false);
+    expect(stream.logs.value.map((entry) => entry.message)).toEqual(['older', 'newer']);
+    expect(FakeEventSource.instances[0].url).toBe('/api/admin/logs/stream?tail=0&after=2');
+  });
+
+  it('marks the stream connected as soon as ready arrives', async () => {
+    const stream = useLogStream({ retryDelaysMs: [500], maxEntries: 3 });
+
+    await stream.connect();
 
     const source = FakeEventSource.instances[0];
     expect(source.url).toBe('/api/admin/logs/stream?tail=200');
@@ -66,10 +95,10 @@ describe('useLogStream', () => {
     expect(stream.connected.value).toBe(true);
   });
 
-  it('appends log messages, trims old entries, and reconnects after the last seen id', () => {
+  it('appends log messages, trims old entries, and reconnects after the last seen id', async () => {
     vi.useFakeTimers();
     const stream = useLogStream({ retryDelaysMs: [500], maxEntries: 2 });
-    stream.connect();
+    await stream.connect();
     const source = FakeEventSource.instances[0];
     source.emitReady();
 
@@ -84,16 +113,16 @@ describe('useLogStream', () => {
     expect(stream.status.value).toBe('reconnecting');
     expect(source.close).toHaveBeenCalledTimes(1);
 
-    vi.advanceTimersByTime(500);
+    await vi.advanceTimersByTimeAsync(500);
 
     expect(FakeEventSource.instances).toHaveLength(2);
     expect(FakeEventSource.instances[1].url).toBe('/api/admin/logs/stream?tail=0&after=3');
   });
 
-  it('disconnect closes the active source and cancels pending reconnects', () => {
+  it('disconnect closes the active source and cancels pending reconnects', async () => {
     vi.useFakeTimers();
     const stream = useLogStream({ retryDelaysMs: [500], maxEntries: 3 });
-    stream.connect();
+    await stream.connect();
     const source = FakeEventSource.instances[0];
 
     source.emitError();
@@ -105,7 +134,7 @@ describe('useLogStream', () => {
     expect(stream.status.value).toBe('disconnected');
   });
 
-  it('marks the stream as error when EventSource cannot be created', () => {
+  it('marks the stream as error when EventSource cannot be created', async () => {
     vi.stubGlobal(
       'EventSource',
       class {
@@ -116,8 +145,24 @@ describe('useLogStream', () => {
     );
     const stream = useLogStream({ retryDelaysMs: [500], maxEntries: 3 });
 
-    stream.connect();
+    await stream.connect();
 
     expect(stream.status.value).toBe('error');
+  });
+
+  it('continues to connect when history loading fails', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: false,
+        json: async () => ({ detail: 'history unavailable' }),
+      }),
+    );
+    const stream = useLogStream({ retryDelaysMs: [500], maxEntries: 3 });
+
+    await stream.connect();
+
+    expect(stream.historyError.value).toBe('history unavailable');
+    expect(FakeEventSource.instances).toHaveLength(1);
   });
 });

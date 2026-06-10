@@ -12,6 +12,7 @@ import type {
   LibraryUpdate,
   LibraryPermission,
   LogEntry,
+  LogHistoryResponse,
   PhotoAlbum,
   ProcessingError,
   ProcessingErrorStats,
@@ -102,6 +103,9 @@ export const api = {
   },
   activeJobs() {
     return request<ScanJob[]>('/api/admin/jobs/active');
+  },
+  logHistory(params?: { limit?: number; cursor?: string; level?: string; category?: string; search?: string }) {
+    return request<LogHistoryResponse>(logHistoryUrl(params));
   },
   thumbnailStats() {
     return request<ThumbnailStats>('/api/admin/thumbnail-stats');
@@ -389,6 +393,17 @@ export function logStreamUrl(params?: { tail?: number; after?: number }) {
   if (params?.after !== undefined) search.set('after', String(params.after));
   const qs = search.toString();
   return `/api/admin/logs/stream${qs ? `?${qs}` : ''}`;
+}
+
+export function logHistoryUrl(params?: { limit?: number; cursor?: string; level?: string; category?: string; search?: string }) {
+  const search = new URLSearchParams();
+  if (params?.limit !== undefined) search.set('limit', String(params.limit));
+  if (params?.cursor) search.set('cursor', params.cursor);
+  if (params?.level) search.set('level', params.level);
+  if (params?.category) search.set('category', params.category);
+  if (params?.search) search.set('search', params.search);
+  const qs = search.toString();
+  return `/api/admin/logs/history${qs ? `?${qs}` : ''}`;
 }
 
 export function thumbnailUrl(assetId: number, size = 'medium') {

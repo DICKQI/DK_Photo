@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { api, logStreamUrl, originalUrl, publicOriginalUrl, publicShareDownloadUrl, publicThumbnailUrl, thumbnailUrl } from './api';
+import { api, logHistoryUrl, logStreamUrl, originalUrl, publicOriginalUrl, publicShareDownloadUrl, publicThumbnailUrl, thumbnailUrl } from './api';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -10,6 +10,23 @@ describe('api url helpers', () => {
     expect(logStreamUrl()).toBe('/api/admin/logs/stream');
     expect(logStreamUrl({ tail: 50 })).toBe('/api/admin/logs/stream?tail=50');
     expect(logStreamUrl({ tail: 0, after: 42 })).toBe('/api/admin/logs/stream?tail=0&after=42');
+  });
+
+  it('builds log history urls and loads history', async () => {
+    expect(logHistoryUrl()).toBe('/api/admin/logs/history');
+    expect(logHistoryUrl({ limit: 50, cursor: '100', level: 'ERROR', category: 'audit', search: 'family trip' })).toBe(
+      '/api/admin/logs/history?limit=50&cursor=100&level=ERROR&category=audit&search=family+trip',
+    );
+
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ items: [], next_cursor: null }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await api.logHistory({ limit: 20, category: 'task' });
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/admin/logs/history?limit=20&category=task', expect.objectContaining({ credentials: 'include' }));
   });
 
   it('builds authenticated asset urls', () => {

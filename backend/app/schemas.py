@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
@@ -323,12 +323,30 @@ class LogEntry(BaseModel):
     level: str
     logger: str
     message: str
+    category: Optional[str] = None
+    action: Optional[str] = None
+    status: Optional[str] = None
+    actor_id: Optional[int] = None
+    target_type: Optional[str] = None
+    target_id: Optional[str] = None
+    request_id: Optional[str] = None
+    duration_ms: Optional[int] = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class LogHistoryRead(BaseModel):
+    items: list[LogEntry]
+    next_cursor: Optional[str] = None
 
 
 class ServerSettingsRead(BaseModel):
     thumb_workers: int
     cpu_count: int | None
     thumb_workers_default: int
+    memory_guard_enabled: bool = True
+    memory_total_bytes: Optional[int] = None
+    memory_available_bytes: Optional[int] = None
+    thumbnail_memory_budget_bytes: Optional[int] = None
 
 
 class ServerSettingsUpdate(BaseModel):

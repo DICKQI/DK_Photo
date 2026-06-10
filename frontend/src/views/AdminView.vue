@@ -325,6 +325,9 @@
               <small class="settings-meta">
                 {{ t('admin.thumbWorkersDefault', { count: serverSettings.thumb_workers_default }) }}
                 <span v-if="serverSettings.cpu_count"> · {{ t('admin.thumbWorkersCpuCores', { count: serverSettings.cpu_count }) }}</span>
+                <span v-if="serverSettings.memory_guard_enabled"> · {{ t('admin.thumbnailMemoryGuard') }}</span>
+                <span v-if="serverSettings.thumbnail_memory_budget_bytes"> · {{ t('admin.thumbnailMemoryBudget', { size: formatBytes(serverSettings.thumbnail_memory_budget_bytes) }) }}</span>
+                <span v-if="serverSettings.memory_available_bytes"> · {{ t('admin.thumbnailMemoryAvailable', { size: formatBytes(serverSettings.memory_available_bytes) }) }}</span>
               </small>
             </div>
           </div>

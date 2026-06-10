@@ -144,6 +144,10 @@ export interface ServerSettings {
   thumb_workers: number;
   cpu_count: number | null;
   thumb_workers_default: number;
+  memory_guard_enabled: boolean;
+  memory_total_bytes: number | null;
+  memory_available_bytes: number | null;
+  thumbnail_memory_budget_bytes: number | null;
 }
 
 export interface LogEntry {
@@ -152,6 +156,20 @@ export interface LogEntry {
   level: string;
   logger: string;
   message: string;
+  category?: string | null;
+  action?: string | null;
+  status?: string | null;
+  actor_id?: number | null;
+  target_type?: string | null;
+  target_id?: string | null;
+  request_id?: string | null;
+  duration_ms?: number | null;
+  metadata?: Record<string, unknown>;
+}
+
+export interface LogHistoryResponse {
+  items: LogEntry[];
+  next_cursor: string | null;
 }
 
 export interface ShareLink {

@@ -11,7 +11,15 @@ from sqlmodel import Session, select
 
 from app.config import get_thumb_workers, settings
 from app.models import Asset, LibraryRoot, Thumbnail
+from app.services.operation_log import log_operation
 from app.services.paths import safe_asset_path
+from app.services.resource_limits import (
+    MemoryAdmissionController,
+    MemoryReservation,
+    default_memory_controller,
+    estimate_image_memory_cost,
+)
+from app.services.scanner import image_file_limit_message, image_pixel_limit_message, open_image_safely
 
 
 THUMBNAIL_SIZES: dict[str, tuple[int, int]] = {
@@ -19,6 +27,39 @@ THUMBNAIL_SIZES: dict[str, tuple[int, int]] = {
     "medium": (720, 720),
     "large": (1440, 1440),
 }
+
+
+def _format_bytes(value: int) -> str:
+    units = ("B", "KB", "MB", "GB", "TB")
+    size = float(max(0, value))
+    unit = 0
+    while size >= 1024 and unit < len(units) - 1:
+        size /= 1024
+        unit += 1
+    return f"{size:.1f} {units[unit]}" if unit else f"{int(size)} {units[unit]}"
+
+
+def _thumbnail_memory_reservation(
+    original_path: Path,
+    memory_controller: MemoryAdmissionController | None,
+) -> tuple[MemoryReservation | None, str | None]:
+    controller = memory_controller or default_memory_controller
+    try:
+        with open_image_safely(original_path) as image:
+            cost = estimate_image_memory_cost(image.size[0], image.size[1], image.mode)
+    except Exception:
+        return None, None
+
+    reservation = controller.acquire(cost)
+    if reservation is not None:
+        return reservation, None
+    return (
+        None,
+        (
+            "缩略图生成已跳过：可用内存不足，"
+            f"估算需要 {_format_bytes(cost)}，当前预算 {_format_bytes(controller.current_budget)}"
+        ),
+    )
 
 
 def thumbnail_cache_path(asset: Asset, size: str) -> Path:
@@ -56,19 +97,49 @@ def ensure_thumbnail(session: Session, asset: Asset, size: str) -> Path:
     if asset_mime_type.startswith("video/"):
         width, height = write_video_placeholder(output_path, max_size)
         _save_thumbnail_record(session, asset_id, size, output_path, width, height, existing_id)
+        log_operation(
+            "thumbnail.generate",
+            category="task",
+            status="success",
+            target_type="asset",
+            target_id=asset_id,
+            message="Thumbnail generated",
+            metadata={"asset_id": asset_id, "size": size, "mime_type": asset_mime_type},
+        )
         return output_path
 
-    with Image.open(original_path) as image:
-        image = ImageOps.exif_transpose(image)
-        if getattr(image, "is_animated", False):
-            image.seek(0)
-        image.thumbnail(max_size, Image.Resampling.LANCZOS)
-        if image.mode not in {"RGB", "RGBA"}:
-            image = image.convert("RGB")
-        image.save(output_path, "WEBP", quality=82, method=3)
-        width, height = image.size
+    limit_message = image_file_limit_message(original_path)
+    if limit_message:
+        raise ValueError(limit_message)
+
+    reservation, memory_error = _thumbnail_memory_reservation(original_path, default_memory_controller)
+    if memory_error:
+        raise ValueError(memory_error)
+
+    try:
+        with open_image_safely(original_path) as image:
+            image = ImageOps.exif_transpose(image)
+            if getattr(image, "is_animated", False):
+                image.seek(0)
+            image.thumbnail(max_size, Image.Resampling.LANCZOS)
+            if image.mode not in {"RGB", "RGBA"}:
+                image = image.convert("RGB")
+            image.save(output_path, "WEBP", quality=82, method=3)
+            width, height = image.size
+    finally:
+        if reservation is not None:
+            reservation.release()
 
     _save_thumbnail_record(session, asset_id, size, output_path, width, height, existing_id)
+    log_operation(
+        "thumbnail.generate",
+        category="task",
+        status="success",
+        target_type="asset",
+        target_id=asset_id,
+        message="Thumbnail generated",
+        metadata={"asset_id": asset_id, "size": size, "mime_type": asset_mime_type},
+    )
     return output_path
 
 
@@ -136,10 +207,22 @@ def write_video_placeholder(output_path: Path, max_size: tuple[int, int]) -> tup
 
 
 def _generate_thumbnail_file(
-    original_path: Path, output_path: Path, max_size: tuple[int, int]
+    original_path: Path,
+    output_path: Path,
+    max_size: tuple[int, int],
+    memory_controller: MemoryAdmissionController | None = None,
+    skip_memory_check: bool = False,
 ) -> tuple[int, int] | None:
+    reservation: MemoryReservation | None = None
     try:
-        with Image.open(original_path) as image:
+        if not skip_memory_check:
+            reservation, memory_error = _thumbnail_memory_reservation(original_path, memory_controller)
+            if memory_error:
+                return None
+        with open_image_safely(original_path) as image:
+            limit_message = image_pixel_limit_message(original_path, image.size[0], image.size[1])
+            if limit_message:
+                return None
             image = ImageOps.exif_transpose(image)
             if getattr(image, "is_animated", False):
                 image.seek(0)
@@ -154,6 +237,9 @@ def _generate_thumbnail_file(
         except OSError:
             pass
         return None
+    finally:
+        if reservation is not None:
+            reservation.release()
 
 
 def _save_thumbnail_results(
@@ -259,16 +345,30 @@ def bulk_generate_thumbnails(
 
     if not work_items:
         session.commit()
+        log_operation(
+            "thumbnail.bulk_generate",
+            category="task",
+            status="success",
+            target_type="thumbnails",
+            message="Bulk thumbnails generated",
+            metadata={
+                "asset_ids": asset_ids,
+                "size": size,
+                "generated_count": generated_count,
+                "requested_count": len(asset_ids),
+            },
+        )
         return generated_count
 
     from app.services.scanner import ScanCancelled
 
     results: list[tuple[Asset, Path, int, int]] = []
+    memory_controller = default_memory_controller
     executor = concurrent.futures.ThreadPoolExecutor(max_workers=max_workers)
     cancelled = False
     try:
         future_to_item: dict[concurrent.futures.Future, tuple[Asset, Path, Path]] = {
-            executor.submit(_generate_thumbnail_file, item[1], item[2], max_size): item
+            executor.submit(_generate_thumbnail_file, item[1], item[2], max_size, memory_controller): item
             for item in work_items
         }
         for future in concurrent.futures.as_completed(future_to_item):
@@ -293,7 +393,21 @@ def bulk_generate_thumbnails(
         executor.shutdown(wait=not cancelled, cancel_futures=cancelled)
 
     saved = _save_thumbnail_results(session, results, size)
-    return generated_count + saved
+    total_generated = generated_count + saved
+    log_operation(
+        "thumbnail.bulk_generate",
+        category="task",
+        status="success",
+        target_type="thumbnails",
+        message="Bulk thumbnails generated",
+        metadata={
+            "asset_ids": asset_ids,
+            "size": size,
+            "generated_count": total_generated,
+            "requested_count": len(asset_ids),
+        },
+    )
+    return total_generated
 
 
 def _thumbnail_hash_path(asset_id: int, asset_path: str, mtime: float, size: str) -> Path:
@@ -308,6 +422,7 @@ def generate_thumbnail_disk_only(
     mtime: float,
     mime_type: str,
     size: str,
+    memory_controller: MemoryAdmissionController | None = None,
 ) -> dict | None:
     if size not in THUMBNAIL_SIZES:
         return None
@@ -343,7 +458,30 @@ def generate_thumbnail_disk_only(
                 "asset_path": asset_path,
                 "message": "原文件不存在",
             }
-        dims = _generate_thumbnail_file(original_path, output_path, max_size)
+        limit_message = image_file_limit_message(original_path)
+        if limit_message:
+            return {
+                "error": True,
+                "asset_id": asset_id,
+                "size": size,
+                "asset_path": asset_path,
+                "message": limit_message,
+            }
+        reservation, memory_error = _thumbnail_memory_reservation(original_path, memory_controller)
+        if memory_error:
+            return {
+                "error": True,
+                "error_type": "memory",
+                "asset_id": asset_id,
+                "size": size,
+                "asset_path": asset_path,
+                "message": memory_error,
+            }
+        try:
+            dims = _generate_thumbnail_file(original_path, output_path, max_size, None, skip_memory_check=True)
+        finally:
+            if reservation is not None:
+                reservation.release()
         if dims is None:
             return {
                 "error": True,

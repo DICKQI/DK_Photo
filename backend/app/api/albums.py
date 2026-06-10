@@ -8,6 +8,7 @@ from app.api.assets import asset_read, asset_search_filter, current_user_favorit
 from app.deps import CurrentUser, SessionDep
 from app.models import Asset, AssetMetadata, PhotoAlbum, PhotoAlbumAsset, utc_now
 from app.schemas import AlbumAssetAddRequest, AlbumCoverUpdate, AlbumCreate, AlbumRead, AlbumUpdate, AssetRead
+from app.services.operation_log import log_operation
 from app.services.permissions import accessible_library_ids, require_asset_access
 
 
@@ -39,6 +40,16 @@ def create_album(payload: AlbumCreate, session: SessionDep, current_user: Curren
     session.refresh(album)
     if payload.asset_ids:
         add_assets_to_album(session, current_user, album, payload.asset_ids)
+    log_operation(
+        "album.create",
+        category="audit",
+        status="success",
+        actor_id=current_user.id,
+        target_type="album",
+        target_id=album.id,
+        message="Album created",
+        metadata={"name": album.name, "asset_count": len(set(payload.asset_ids or []))},
+    )
     return album_read(session, album)
 
 
@@ -66,6 +77,16 @@ def update_album(
     session.add(album)
     session.commit()
     session.refresh(album)
+    log_operation(
+        "album.update",
+        category="audit",
+        status="success",
+        actor_id=current_user.id,
+        target_type="album",
+        target_id=album.id,
+        message="Album updated",
+        metadata={"name_changed": payload.name is not None, "description_changed": payload.description is not None},
+    )
     return album_read(session, album)
 
 
@@ -94,6 +115,16 @@ def update_album_cover(
     session.add(album)
     session.commit()
     session.refresh(album)
+    log_operation(
+        "album.cover.update",
+        category="audit",
+        status="success",
+        actor_id=current_user.id,
+        target_type="album",
+        target_id=album.id,
+        message="Album cover updated",
+        metadata={"cover_asset_id": payload.cover_asset_id},
+    )
     return album_read(session, album)
 
 
@@ -144,6 +175,16 @@ def add_album_assets(
 ) -> AlbumRead:
     album = require_owned_album(session, current_user, album_id)
     add_assets_to_album(session, current_user, album, payload.asset_ids)
+    log_operation(
+        "album.assets.add",
+        category="audit",
+        status="success",
+        actor_id=current_user.id,
+        target_type="album",
+        target_id=album.id,
+        message="Assets added to album",
+        metadata={"asset_ids": list(dict.fromkeys(payload.asset_ids)), "requested_count": len(payload.asset_ids)},
+    )
     return album_read(session, album)
 
 
@@ -156,6 +197,16 @@ def remove_album_assets(
 ) -> AlbumRead:
     album = require_owned_album(session, current_user, album_id)
     remove_assets_from_album(session, album, payload.asset_ids)
+    log_operation(
+        "album.assets.remove",
+        category="audit",
+        status="success",
+        actor_id=current_user.id,
+        target_type="album",
+        target_id=album.id,
+        message="Assets removed from album",
+        metadata={"asset_ids": list(dict.fromkeys(payload.asset_ids)), "requested_count": len(payload.asset_ids)},
+    )
     return album_read(session, album)
 
 
@@ -167,6 +218,16 @@ def delete_album(album_id: int, session: SessionDep, current_user: CurrentUser) 
         session.delete(row)
     session.delete(album)
     session.commit()
+    log_operation(
+        "album.delete",
+        category="audit",
+        status="success",
+        actor_id=current_user.id,
+        target_type="album",
+        target_id=album_id,
+        message="Album deleted",
+        metadata={"asset_count": len(rows)},
+    )
     return {"ok": True}
 
 

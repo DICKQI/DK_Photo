@@ -7,6 +7,7 @@ import mimetypes
 import os
 import queue
 import threading
+import warnings
 from dataclasses import dataclass
 from datetime import datetime
 from fractions import Fraction
@@ -18,8 +19,6 @@ from PIL import ExifTags, Image
 _max_pixels_env = os.getenv("DK_PHOTO_MAX_IMAGE_PIXELS", "")
 if _max_pixels_env:
     Image.MAX_IMAGE_PIXELS = int(_max_pixels_env)
-elif Image.MAX_IMAGE_PIXELS is not None:
-    Image.MAX_IMAGE_PIXELS = max(Image.MAX_IMAGE_PIXELS, 500_000_000)
 from sqlalchemy import delete as sa_delete
 from sqlalchemy import func
 from sqlmodel import Session, select
@@ -27,7 +26,9 @@ from sqlmodel import Session, select
 logger = logging.getLogger(__name__)
 
 from app.models import Asset, Folder, LibraryRoot, PhotoAlbum, PhotoAlbumAsset, ProcessingError, ScanJob, Thumbnail, utc_now
+from app.services.operation_log import log_operation
 from app.services.paths import is_docker_photos_root
+from app.services.resource_limits import MemoryAdmissionController, default_memory_controller
 
 
 SUPPORTED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
@@ -191,15 +192,19 @@ def active_scan_job(session: Session, library_id: int) -> ScanJob | None:
 
 
 def is_supported_image(path: Path) -> bool:
-    return path.suffix.lower() in SUPPORTED_IMAGE_EXTENSIONS
+    return not is_ignored_media_file(path) and path.suffix.lower() in SUPPORTED_IMAGE_EXTENSIONS
 
 
 def is_supported_video(path: Path) -> bool:
-    return path.suffix.lower() in SUPPORTED_VIDEO_EXTENSIONS
+    return not is_ignored_media_file(path) and path.suffix.lower() in SUPPORTED_VIDEO_EXTENSIONS
 
 
 def is_supported_media(path: Path) -> bool:
-    return path.suffix.lower() in SUPPORTED_EXTENSIONS
+    return not is_ignored_media_file(path) and path.suffix.lower() in SUPPORTED_EXTENSIONS
+
+
+def is_ignored_media_file(path: Path) -> bool:
+    return path.name.startswith("._")
 
 
 def relative_posix(path: Path, root: Path) -> str:
@@ -211,12 +216,16 @@ EXIF_TAGS = {value: key for key, value in ExifTags.TAGS.items()}
 GPS_TAGS = {value: key for key, value in ExifTags.GPSTAGS.items()}
 
 
-def get_image_metadata(path: Path) -> dict[str, Any]:
+def get_image_metadata(path: Path) -> dict[str, Any] | None:
     metadata = empty_asset_metadata()
 
     try:
-        with Image.open(path) as image:
+        with open_image_safely(path) as image:
             raw_width, raw_height = image.size
+            limit_message = image_pixel_limit_message(path, raw_width, raw_height)
+            if limit_message:
+                logger.warning(limit_message)
+                return None
 
             pillow_exif = image.getexif()
             if pillow_exif:
@@ -236,6 +245,34 @@ def get_image_metadata(path: Path) -> dict[str, Any]:
         return None
 
     return metadata
+
+
+def open_image_safely(path: Path) -> Image.Image:
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", Image.DecompressionBombWarning)
+        return Image.open(path)
+
+
+def image_pixel_limit_message(path: Path, width: int, height: int) -> str | None:
+    limit = Image.MAX_IMAGE_PIXELS
+    if limit is None:
+        return None
+    pixels = width * height
+    if pixels <= limit:
+        return None
+    return f"图片像素过大，已跳过以避免内存耗尽：{path.name} ({width}x{height}, {pixels} 像素，当前上限 {limit} 像素)"
+
+
+def image_file_limit_message(path: Path) -> str | None:
+    try:
+        with open_image_safely(path) as image:
+            width, height = image.size
+            return image_pixel_limit_message(path, width, height)
+    except Image.DecompressionBombError:
+        limit = Image.MAX_IMAGE_PIXELS
+        return f"图片像素过大，已跳过以避免内存耗尽：{path.name} (当前上限 {limit} 像素)"
+    except Exception:
+        return None
 
 
 def _pillow_orientation(exif: Image.Exif) -> int | None:
@@ -508,7 +545,7 @@ def upsert_asset(
                         asset_path=rel_path,
                         filename=media_path.name,
                         error_type="metadata",
-                        error_message=f"无法读取图片元数据：{media_path.name}",
+                        error_message=metadata_error_message(media_path),
                     )
                 )
                 session.commit()
@@ -543,6 +580,10 @@ def upsert_asset(
 def apply_asset_metadata(asset: Asset, metadata: dict[str, Any]) -> None:
     for key, value in metadata.items():
         setattr(asset, key, value)
+
+
+def metadata_error_message(path: Path) -> str:
+    return image_file_limit_message(path) or f"无法读取图片元数据：{path.name}"
 
 
 def _chunks(items: list[int], size: int = DELETE_CHUNK_SIZE):
@@ -719,6 +760,7 @@ def scan_library(
     from app.config import get_thumb_workers
     worker_budget = get_thumb_workers()
     executor = PriorityExecutor(max_workers=worker_budget)
+    thumbnail_memory_controller = default_memory_controller
     thumb_futures: list[concurrent.futures.Future] = []
     meta_pending: list[dict] = []
     MAX_THUMB_OUTSTANDING = worker_budget * 4
@@ -743,6 +785,7 @@ def scan_library(
                 completed_thumbs,
                 thumb_futures,
                 future_contexts,
+                thumbnail_memory_controller,
             )
         if thumb_futures:
             thumbnail_ready_images += _flush_completed_thumbnail_progress(
@@ -987,6 +1030,7 @@ def _flush_meta_pending(
         except Exception:
             metadata = None
         if metadata is None:
+            ctx["skip_thumbnail"] = True
             session.add(
                 ProcessingError(
                     library_id=library_id,
@@ -994,22 +1038,27 @@ def _flush_meta_pending(
                     asset_path=ctx["rel"],
                     filename=ctx["filename"],
                     error_type="metadata",
-                    error_message=f"无法读取图片元数据：{ctx['filename']}",
+                    error_message=metadata_error_message(ctx["media_path"]),
                 )
             )
             metadata = empty_asset_metadata()
         metadata_by_index[index] = metadata
 
+    thumbnail_assets: list[Asset] = []
     for index, ctx in enumerate(contexts):
-        _apply_metadata_context(
+        asset = _apply_metadata_context(
             session,
             library_id,
             ctx,
             metadata_by_index[index],
             seen_asset_paths,
-            pending_images,
-            generate_thumbnails,
         )
+        if generate_thumbnails and ctx["is_image"] and not ctx.get("skip_thumbnail"):
+            thumbnail_assets.append(asset)
+
+    if thumbnail_assets:
+        session.flush()
+        pending_images.extend(thumbnail_assets)
 
 
 def _apply_metadata_context(
@@ -1018,9 +1067,7 @@ def _apply_metadata_context(
     ctx: dict,
     metadata: dict[str, Any],
     seen_asset_paths: set[str],
-    pending_images: list[Asset | _ThumbAsset],
-    generate_thumbnails: bool,
-) -> None:
+) -> Asset:
     asset = _apply_metadata_to_asset(
         session,
         library_id,
@@ -1034,8 +1081,7 @@ def _apply_metadata_context(
         metadata,
     )
     seen_asset_paths.add(asset.path)
-    if generate_thumbnails and ctx["is_image"]:
-        pending_images.append(asset)
+    return asset
 
 
 def _submit_pending_thumbnails(
@@ -1045,6 +1091,7 @@ def _submit_pending_thumbnails(
     completed: set[tuple[int, str]],
     futures_out: list[concurrent.futures.Future],
     future_contexts: dict[concurrent.futures.Future, dict] | None = None,
+    memory_controller: MemoryAdmissionController | None = None,
 ) -> None:
     from app.services.thumbnails import generate_thumbnail_disk_only
 
@@ -1062,6 +1109,7 @@ def _submit_pending_thumbnails(
                 mtime=asset.mtime,
                 mime_type=asset.mime_type,
                 size=size,
+                memory_controller=memory_controller,
                 priority=THUMBNAIL_PRIORITY,
             )
             futures_out.append(future)
@@ -1250,6 +1298,15 @@ def run_scan_job(session: Session, job_id: int, generate_thumbnails: bool = Fals
             return
         if cancel_event.is_set():
             _mark_job_cancelled(session, job, 0, "Scan cancelled before start")
+            log_operation(
+                "scan.cancelled",
+                category="task",
+                status="cancelled",
+                target_type="scan_job",
+                target_id=job.id,
+                message="Scan cancelled before start",
+                metadata={"job_id": job.id, "library_id": job.library_id, "processed_assets": 0},
+            )
             return
 
         job.status = "running"
@@ -1262,11 +1319,45 @@ def run_scan_job(session: Session, job_id: int, generate_thumbnails: bool = Fals
         job.processed_videos = 0
         job.thumbnail_ready_images = 0
         session.commit()
+        log_operation(
+            "scan.running",
+            category="task",
+            status="running",
+            target_type="scan_job",
+            target_id=job.id,
+            message="Scan started",
+            metadata={"job_id": job.id, "library_id": job.library_id, "generate_thumbnails": generate_thumbnails},
+        )
 
         total = scan_library(
             session, job.library_id, job=job, generate_thumbnails=generate_thumbnails, cancel_event=cancel_event
         )
+        if job.status == "cancelled":
+            log_operation(
+                "scan.cancelled",
+                category="task",
+                status="cancelled",
+                target_type="scan_job",
+                target_id=job.id,
+                message="Scan cancelled",
+                metadata={
+                    "job_id": job.id,
+                    "library_id": job.library_id,
+                    "processed_assets": job.processed_assets,
+                    "processed_images": job.processed_images,
+                    "processed_videos": job.processed_videos,
+                },
+            )
     except ScanCancelled:
+        log_operation(
+            "scan.cancelled",
+            category="task",
+            status="cancelled",
+            target_type="scan_job",
+            target_id=job.id,
+            message="Scan cancelled",
+            metadata={"job_id": job.id, "library_id": job.library_id},
+        )
         return
     except Exception as exc:  # pragma: no cover - defensive status reporting
         session.rollback()
@@ -1275,6 +1366,16 @@ def run_scan_job(session: Session, job_id: int, generate_thumbnails: bool = Fals
         job.finished_at = utc_now()
         session.add(job)
         session.commit()
+        log_operation(
+            "scan.failed",
+            category="task",
+            status="failed",
+            target_type="scan_job",
+            target_id=job.id,
+            message="Scan failed",
+            metadata={"job_id": job.id, "library_id": job.library_id, "error": str(exc)},
+            level=logging.ERROR,
+        )
         raise
     finally:
         with _cancel_lock:
@@ -1287,3 +1388,20 @@ def run_scan_job(session: Session, job_id: int, generate_thumbnails: bool = Fals
             job.message = f"Indexed {total} media items"
         job.finished_at = utc_now()
     session.commit()
+    if job.status == "completed":
+        log_operation(
+            "scan.completed",
+            category="task",
+            status="success",
+            target_type="scan_job",
+            target_id=job.id,
+            message="Scan completed",
+            metadata={
+                "job_id": job.id,
+                "library_id": job.library_id,
+                "total_assets": job.total_assets,
+                "processed_images": job.processed_images,
+                "processed_videos": job.processed_videos,
+                "thumbnail_ready_images": job.thumbnail_ready_images,
+            },
+        )

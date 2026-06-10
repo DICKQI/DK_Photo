@@ -10,8 +10,9 @@ from watchdog.observers import Observer
 
 from app.db import engine
 from app.models import LibraryRoot, ScanJob
+from app.services.operation_log import log_operation
 from app.services.paths import is_docker_photos_root
-from app.services.scanner import active_scan_job, run_scan_job
+from app.services.scanner import active_scan_job, is_supported_media, run_scan_job
 
 
 class DebouncedScanHandler(FileSystemEventHandler):
@@ -23,8 +24,7 @@ class DebouncedScanHandler(FileSystemEventHandler):
         if event.is_directory:
             self.schedule_scan(self.library_id)
             return
-        suffix = Path(event.src_path).suffix.lower()
-        if suffix in {".jpg", ".jpeg", ".png", ".webp", ".gif", ".mp4", ".mov", ".m4v", ".webm", ".avi", ".mkv"}:
+        if is_supported_media(Path(event.src_path)):
             self.schedule_scan(self.library_id)
 
 
@@ -86,9 +86,27 @@ class LibraryWatcher:
         self.timers.pop(library_id, None)
         with Session(engine) as session:
             if active_scan_job(session, library_id):
+                log_operation(
+                    "watcher.scan.skipped",
+                    category="task",
+                    status="skipped",
+                    target_type="library",
+                    target_id=library_id,
+                    message="Filesystem scan skipped because another scan is active",
+                    metadata={"library_id": library_id},
+                )
                 return
             job = ScanJob(library_id=library_id, status="queued", message="Filesystem change detected")
             session.add(job)
             session.commit()
             session.refresh(job)
+            log_operation(
+                "watcher.scan.queued",
+                category="task",
+                status="queued",
+                target_type="scan_job",
+                target_id=job.id,
+                message="Filesystem change queued scan",
+                metadata={"job_id": job.id, "library_id": library_id},
+            )
             run_scan_job(session, job.id or 0, generate_thumbnails=True)

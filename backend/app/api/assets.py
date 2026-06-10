@@ -27,6 +27,7 @@ from app.schemas import (
     AssetTagsBulkRemove,
     AssetTagsUpdate,
 )
+from app.services.operation_log import log_operation
 from app.services.paths import safe_asset_path
 from app.services.permissions import accessible_library_ids, require_asset_access
 from app.services.thumbnails import ensure_thumbnail
@@ -368,6 +369,15 @@ def add_asset_tags_bulk(
             next_count += 1
 
     session.commit()
+    log_operation(
+        "asset.tags.bulk_add",
+        category="audit",
+        status="success",
+        actor_id=current_user.id,
+        target_type="asset",
+        message="Bulk tags added",
+        metadata={"asset_ids": asset_ids, "tags": tag_names, "asset_count": len(asset_ids)},
+    )
     favorite_ids = current_user_favorite_asset_ids(session, current_user)
     return [asset_read(session, asset, favorite_ids, user_id) for asset in ordered_assets]
 
@@ -405,6 +415,15 @@ def remove_asset_tags_bulk(
                 session.delete(tag)
 
     session.commit()
+    log_operation(
+        "asset.tags.bulk_remove",
+        category="audit",
+        status="success",
+        actor_id=current_user.id,
+        target_type="asset",
+        message="Bulk tags removed",
+        metadata={"asset_ids": asset_ids, "tags": tag_names, "asset_count": len(asset_ids)},
+    )
     favorite_ids = current_user_favorite_asset_ids(session, current_user)
     return [asset_read(session, asset, favorite_ids, user_id) for asset in ordered_assets]
 
@@ -434,6 +453,16 @@ def rename_asset_tag(
                 tag.name = new_name
     session.commit()
     count = len(accessible_asset_tags(session, current_user, new_name))
+    log_operation(
+        "asset.tag.rename",
+        category="audit",
+        status="success",
+        actor_id=current_user.id,
+        target_type="tag",
+        target_id=new_name,
+        message="Asset tag renamed",
+        metadata={"old_name": old_name, "new_name": new_name, "asset_count": count},
+    )
     return AssetTagRead(name=new_name, asset_count=count)
 
 
@@ -448,6 +477,16 @@ def delete_asset_tag(tag_name: str, session: SessionDep, current_user: CurrentUs
     for tag in tags:
         session.delete(tag)
     session.commit()
+    log_operation(
+        "asset.tag.delete",
+        category="audit",
+        status="success",
+        actor_id=current_user.id,
+        target_type="tag",
+        target_id=name,
+        message="Asset tag deleted",
+        metadata={"name": name, "asset_count": len(tags)},
+    )
     return {"ok": True}
 
 
@@ -483,6 +522,16 @@ def update_asset_favorite(
     elif not payload.is_favorite and favorite:
         session.delete(favorite)
         session.commit()
+    log_operation(
+        "asset.favorite.update",
+        category="audit",
+        status="success",
+        actor_id=current_user.id,
+        target_type="asset",
+        target_id=asset_id,
+        message="Asset favorite updated",
+        metadata={"asset_id": asset_id, "is_favorite": payload.is_favorite},
+    )
     return asset_read(session, asset, {asset_id} if payload.is_favorite else set(), current_user.id or 0)
 
 
@@ -520,6 +569,16 @@ def update_asset_metadata(
             )
             session.add(metadata)
         session.commit()
+    log_operation(
+        "asset.metadata.update",
+        category="audit",
+        status="success",
+        actor_id=current_user.id,
+        target_type="asset",
+        target_id=asset_id,
+        message="Asset metadata updated",
+        metadata={"asset_id": asset_id, "has_description": bool(description), "rating": rating},
+    )
     return asset_read(session, asset, current_user_favorite_asset_ids(session, current_user), user_id)
 
 
@@ -547,6 +606,16 @@ def update_asset_tags(
     for name in tag_names:
         session.add(AssetTag(user_id=current_user.id or 0, asset_id=asset_id, name=name))
     session.commit()
+    log_operation(
+        "asset.tags.update",
+        category="audit",
+        status="success",
+        actor_id=current_user.id,
+        target_type="asset",
+        target_id=asset_id,
+        message="Asset tags updated",
+        metadata={"asset_id": asset_id, "tags": tag_names, "tag_count": len(tag_names)},
+    )
     return asset_read(session, asset, current_user_favorite_asset_ids(session, current_user), current_user.id or 0)
 
 
@@ -563,6 +632,15 @@ def download_assets(payload: AssetDownloadRequest, session: SessionDep, current_
         asset = assets_by_id[asset_id]
         require_asset_access(session, current_user, asset)
         ordered_assets.append(asset)
+    log_operation(
+        "asset.download",
+        category="audit",
+        status="success",
+        actor_id=current_user.id,
+        target_type="asset",
+        message="Assets downloaded",
+        metadata={"asset_ids": asset_ids, "asset_count": len(asset_ids)},
+    )
     return stream_asset_archive(session, ordered_assets, "dk-photo-originals.zip")
 
 

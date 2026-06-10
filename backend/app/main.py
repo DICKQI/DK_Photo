@@ -11,6 +11,7 @@ from app import logger
 from app.api import admin, albums, assets, auth, folders, shares
 from app.config import settings
 from app.db import create_db_and_tables
+from app.middleware import operation_request_logger
 from app.services.watcher import LibraryWatcher
 
 
@@ -36,6 +37,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title=settings.app_name, lifespan=lifespan)
 app.state.library_watcher = watcher
+app.middleware("http")(operation_request_logger)
 
 app.add_middleware(
     CORSMiddleware,

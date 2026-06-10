@@ -16,6 +16,7 @@ from app.api.assets import stream_asset_archive
 from app.models import Asset, Folder, LibraryRoot, ShareAsset, ShareLink, User, utc_now
 from app.schemas import AssetRead, PublicShareRead, ShareCreate, ShareRead, ShareUpdate, ShareVerifyRequest
 from app.security import hash_password, verify_password
+from app.services.operation_log import log_operation
 from app.services.paths import safe_asset_path
 from app.services.permissions import can_access_library, require_asset_access, require_folder_access
 from app.services.thumbnails import ensure_thumbnail
@@ -96,6 +97,24 @@ def create_share(payload: ShareCreate, session: SessionDep, current_user: Curren
             session.add(ShareAsset(share_id=share.id, asset_id=aid))
         session.commit()
         session.refresh(share)
+    log_operation(
+        "share.create",
+        category="audit",
+        status="success",
+        actor_id=current_user.id,
+        target_type="share",
+        target_id=share.id,
+        message="Share created",
+        metadata={
+            "share_id": share.id,
+            "share_kind": share_kind(share),
+            "asset_id": share.asset_id,
+            "folder_id": share.folder_id,
+            "asset_count": len(shared_asset_ids) if shared_asset_ids else (1 if share.asset_id else None),
+            "has_password": bool(share.password_hash),
+            "expires_at": share.expires_at.isoformat() if share.expires_at else None,
+        },
+    )
     return share_read(session, share)
 
 
@@ -133,6 +152,21 @@ def update_share(share_id: int, payload: ShareUpdate, session: SessionDep, curre
     session.add(share)
     session.commit()
     session.refresh(share)
+    log_operation(
+        "share.update",
+        category="audit",
+        status="success",
+        actor_id=current_user.id,
+        target_type="share",
+        target_id=share.id,
+        message="Share updated",
+        metadata={
+            "share_id": share.id,
+            "title_changed": payload.title is not None,
+            "expiry_changed": payload.expires_in_days is not None,
+            "password_changed": payload.password is not None,
+        },
+    )
     return share_read(session, share)
 
 
@@ -148,6 +182,16 @@ def delete_share(share_id: int, session: SessionDep, current_user: CurrentUser) 
     share.revoked_at = utc_now()
     session.add(share)
     session.commit()
+    log_operation(
+        "share.revoke",
+        category="audit",
+        status="success",
+        actor_id=current_user.id,
+        target_type="share",
+        target_id=share.id,
+        message="Share revoked",
+        metadata={"share_id": share.id, "share_kind": share_kind(share)},
+    )
     return {"ok": True}
 
 
@@ -211,8 +255,26 @@ def get_public_share(token: str, session: SessionDep) -> PublicShareRead:
 def verify_share_password(token: str, payload: ShareVerifyRequest, session: SessionDep, response: Response) -> dict:
     share = get_active_share(session, token)
     if not share.password_hash:
+        log_operation(
+            "share.verify",
+            category="audit",
+            status="success",
+            target_type="share",
+            target_id=share.id,
+            message="Share access verified",
+            metadata={"share_id": share.id, "password_required": False},
+        )
         return {"verified": True, "access_token": None}
     if not verify_password(payload.password, share.password_hash):
+        log_operation(
+            "share.verify",
+            category="audit",
+            status="failed",
+            target_type="share",
+            target_id=share.id,
+            message="Share password verification failed",
+            metadata={"share_id": share.id, "password_required": True},
+        )
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid share password")
     verify_token = create_share_verify_token(share.token)
     response.set_cookie(
@@ -222,6 +284,15 @@ def verify_share_password(token: str, payload: ShareVerifyRequest, session: Sess
         samesite="lax",
         secure=False,
         max_age=3600,
+    )
+    log_operation(
+        "share.verify",
+        category="audit",
+        status="success",
+        target_type="share",
+        target_id=share.id,
+        message="Share access verified",
+        metadata={"share_id": share.id, "password_required": True},
     )
     return {"verified": True, "access_token": verify_token}
 

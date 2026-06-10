@@ -40,6 +40,7 @@ from app.schemas import (
     LibraryRead,
     LibraryUpdate,
     PasswordReset,
+    LogHistoryRead,
     ProcessingErrorRead,
     ProcessingErrorStats,
     ScanJobRead,
@@ -54,9 +55,11 @@ from app.schemas import (
 )
 from app import logger
 from app.security import hash_password
+from app.services.operation_log import log_operation
 from app.api.shares import share_read
 from app.services.filesystem import list_children, list_roots
 from app.services.paths import is_docker_photos_root, resolve_library_path
+from app.services import resource_limits
 from app.services.scanner import active_scan_job, request_cancel_scan_job, run_scan_job, acquire_scan_creation_lock, release_scan_creation_lock
 
 
@@ -79,7 +82,7 @@ def filesystem_children(path: str, _: AdminUser) -> FilesystemChildren:
 
 
 @router.post("/libraries", response_model=LibraryRead)
-def create_library(payload: LibraryCreate, request: Request, session: SessionDep, _: AdminUser) -> LibraryRoot:
+def create_library(payload: LibraryCreate, request: Request, session: SessionDep, admin: AdminUser) -> LibraryRoot:
     path = resolve_library_path(payload.path)
     existing = session.exec(select(LibraryRoot).where(LibraryRoot.path == str(path))).first()
     if existing:
@@ -91,11 +94,21 @@ def create_library(payload: LibraryCreate, request: Request, session: SessionDep
     watcher = getattr(request.app.state, "library_watcher", None)
     if watcher:
         watcher.refresh()
+    log_operation(
+        "library.create",
+        category="audit",
+        status="success",
+        actor_id=admin.id,
+        target_type="library",
+        target_id=library.id,
+        message="Library created",
+        metadata={"name": library.name, "path": library.path, "watch_enabled": library.watch_enabled},
+    )
     return library
 
 
 @router.patch("/libraries/{library_id}", response_model=LibraryRead)
-def update_library(library_id: int, payload: LibraryUpdate, request: Request, session: SessionDep, _: AdminUser) -> LibraryRoot:
+def update_library(library_id: int, payload: LibraryUpdate, request: Request, session: SessionDep, admin: AdminUser) -> LibraryRoot:
     library = session.get(LibraryRoot, library_id)
     if not library:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Library not found")
@@ -121,6 +134,21 @@ def update_library(library_id: int, payload: LibraryUpdate, request: Request, se
         watcher = getattr(request.app.state, "library_watcher", None)
         if watcher:
             watcher.refresh()
+    log_operation(
+        "library.update",
+        category="audit",
+        status="success",
+        actor_id=admin.id,
+        target_type="library",
+        target_id=library.id,
+        message="Library updated",
+        metadata={
+            "name": library.name,
+            "name_changed": payload.name is not None,
+            "watch_enabled": library.watch_enabled,
+            "watch_changed": watch_changed,
+        },
+    )
     return library
 
 
@@ -130,7 +158,7 @@ def delete_library(
     request: Request,
     background_tasks: BackgroundTasks,
     session: SessionDep,
-    _: AdminUser,
+    admin: AdminUser,
 ) -> dict[str, bool]:
     library = session.get(LibraryRoot, library_id)
     if not library:
@@ -151,6 +179,16 @@ def delete_library(
         watcher.refresh()
 
     background_tasks.add_task(_delete_library_cleanup, library_id)
+    log_operation(
+        "library.delete.queued",
+        category="task",
+        status="queued",
+        actor_id=admin.id,
+        target_type="library",
+        target_id=library_id,
+        message="Library deletion queued",
+        metadata={"library_id": library_id, "name": library.name, "path": library.path},
+    )
     return {"ok": True}
 
 
@@ -237,6 +275,19 @@ def _delete_library_cleanup(library_id: int) -> None:
         if library:
             cleanup_session.delete(library)
         cleanup_session.commit()
+        log_operation(
+            "library.delete.completed",
+            category="task",
+            status="success",
+            target_type="library",
+            target_id=library_id,
+            message="Library deletion cleanup completed",
+            metadata={
+                "library_id": library_id,
+                "asset_count": len(assets),
+                "folder_count": len(folders),
+            },
+        )
 
 
 @router.post("/libraries/{library_id}/scan", response_model=ScanJobRead)
@@ -244,7 +295,7 @@ def scan_library_endpoint(
     library_id: int,
     background_tasks: BackgroundTasks,
     session: SessionDep,
-    _: AdminUser,
+    admin: AdminUser,
 ) -> ScanJob:
     library = session.get(LibraryRoot, library_id)
     if not library:
@@ -273,6 +324,16 @@ def scan_library_endpoint(
         session.refresh(job)
     finally:
         release_scan_creation_lock(lock)
+    log_operation(
+        "scan.queued",
+        category="task",
+        status="queued",
+        actor_id=admin.id,
+        target_type="scan_job",
+        target_id=job.id,
+        message="Manual scan queued",
+        metadata={"job_id": job.id, "library_id": library_id, "library_name": library.name},
+    )
     background_tasks.add_task(_run_job_in_new_session, job.id or 0)
     return job
 
@@ -323,7 +384,7 @@ def list_active_jobs(session: SessionDep, _: CurrentUser) -> list[ScanJobRead]:
 
 
 @router.post("/jobs/{job_id}/cancel")
-def cancel_scan_job(job_id: int, session: SessionDep, _: AdminUser) -> dict:
+def cancel_scan_job(job_id: int, session: SessionDep, admin: AdminUser) -> dict:
     job = session.get(ScanJob, job_id)
     if not job:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scan job not found")
@@ -339,6 +400,16 @@ def cancel_scan_job(job_id: int, session: SessionDep, _: AdminUser) -> dict:
         job.message = "Scan cancelled before start"
         job.finished_at = utc_now()
         session.commit()
+        log_operation(
+            "scan.cancelled",
+            category="task",
+            status="cancelled",
+            actor_id=admin.id,
+            target_type="scan_job",
+            target_id=job.id,
+            message="Scan cancelled before start",
+            metadata={"job_id": job.id, "library_id": job.library_id},
+        )
         return {"ok": True}
 
     ok = request_cancel_scan_job(job_id)
@@ -347,6 +418,16 @@ def cancel_scan_job(job_id: int, session: SessionDep, _: AdminUser) -> dict:
             status_code=status.HTTP_409_CONFLICT,
             detail="Could not cancel the running scan (job may be in a different process)",
         )
+    log_operation(
+        "scan.cancel.requested",
+        category="task",
+        status="pending",
+        actor_id=admin.id,
+        target_type="scan_job",
+        target_id=job.id,
+        message="Scan cancellation requested",
+        metadata={"job_id": job.id, "library_id": job.library_id},
+    )
     return {"ok": True}
 
 
@@ -426,7 +507,7 @@ def get_user(user_id: int, session: SessionDep, _: AdminUser) -> User:
 
 
 @router.post("/users", response_model=UserRead)
-def create_user(payload: UserCreate, session: SessionDep, _: AdminUser) -> User:
+def create_user(payload: UserCreate, session: SessionDep, admin: AdminUser) -> User:
     role = payload.role if payload.role in {"admin", "member"} else "member"
     existing = session.exec(
         select(User).where(User.email == payload.email.lower(), User.deleted_at == None)
@@ -442,11 +523,21 @@ def create_user(payload: UserCreate, session: SessionDep, _: AdminUser) -> User:
     session.add(user)
     session.commit()
     session.refresh(user)
+    log_operation(
+        "user.create",
+        category="audit",
+        status="success",
+        actor_id=admin.id,
+        target_type="user",
+        target_id=user.id,
+        message="User created",
+        metadata={"email": user.email, "role": user.role},
+    )
     return user
 
 
 @router.patch("/users/{user_id}", response_model=UserRead)
-def update_user(user_id: int, payload: UserUpdate, session: SessionDep, _: AdminUser) -> User:
+def update_user(user_id: int, payload: UserUpdate, session: SessionDep, admin: AdminUser) -> User:
     user = managed_user(session, user_id)
     if payload.email and payload.email.lower() != user.email:
         existing = session.exec(
@@ -465,15 +556,40 @@ def update_user(user_id: int, payload: UserUpdate, session: SessionDep, _: Admin
         user.role = payload.role if payload.role in {"admin", "member"} else user.role
     session.commit()
     session.refresh(user)
+    log_operation(
+        "user.update",
+        category="audit",
+        status="success",
+        actor_id=admin.id,
+        target_type="user",
+        target_id=user.id,
+        message="User updated",
+        metadata={
+            "email_changed": payload.email is not None,
+            "display_name_changed": payload.display_name is not None,
+            "role_changed": payload.role is not None,
+            "role": user.role,
+        },
+    )
     return user
 
 
 @router.post("/users/{user_id}/password")
-def reset_user_password(user_id: int, payload: PasswordReset, session: SessionDep, _: AdminUser) -> dict[str, bool]:
+def reset_user_password(user_id: int, payload: PasswordReset, session: SessionDep, admin: AdminUser) -> dict[str, bool]:
     user = managed_user(session, user_id)
     user.password_hash = hash_password(payload.password)
     user.token_version += 1
     session.commit()
+    log_operation(
+        "user.password.reset",
+        category="audit",
+        status="success",
+        actor_id=admin.id,
+        target_type="user",
+        target_id=user.id,
+        message="User password reset",
+        metadata={"token_version": user.token_version},
+    )
     return {"ok": True}
 
 
@@ -494,6 +610,16 @@ def delete_user(user_id: int, session: SessionDep, admin: AdminUser) -> dict[str
     user.display_name = "Deleted User"
     session.add(user)
     session.commit()
+    log_operation(
+        "user.delete",
+        category="audit",
+        status="success",
+        actor_id=admin.id,
+        target_type="user",
+        target_id=user_id,
+        message="User deleted",
+        metadata={"revoked_personal_data": True},
+    )
     return {"ok": True}
 
 
@@ -507,15 +633,34 @@ def disable_user(user_id: int, session: SessionDep, admin: AdminUser) -> User:
     revoke_user_shares(session, user_id)
     session.commit()
     session.refresh(user)
+    log_operation(
+        "user.disable",
+        category="audit",
+        status="success",
+        actor_id=admin.id,
+        target_type="user",
+        target_id=user.id,
+        message="User disabled",
+        metadata={"token_version": user.token_version},
+    )
     return user
 
 
 @router.post("/users/{user_id}/enable", response_model=UserRead)
-def enable_user(user_id: int, session: SessionDep, _: AdminUser) -> User:
+def enable_user(user_id: int, session: SessionDep, admin: AdminUser) -> User:
     user = managed_user(session, user_id)
     user.is_active = True
     session.commit()
     session.refresh(user)
+    log_operation(
+        "user.enable",
+        category="audit",
+        status="success",
+        actor_id=admin.id,
+        target_type="user",
+        target_id=user.id,
+        message="User enabled",
+    )
     return user
 
 
@@ -530,7 +675,7 @@ def update_user_permissions(
     user_id: int,
     payload: list[LibraryPermissionUpdate],
     session: SessionDep,
-    _: AdminUser,
+    admin: AdminUser,
 ) -> list[LibraryPermission]:
     user = managed_user(session, user_id)
     existing = session.exec(select(LibraryPermission).where(LibraryPermission.user_id == user_id)).all()
@@ -572,6 +717,19 @@ def update_user_permissions(
         revoke_user_shares_outside_libraries(session, user_id, allowed_share_library_ids)
 
     session.commit()
+    log_operation(
+        "user.permissions.update",
+        category="audit",
+        status="success",
+        actor_id=admin.id,
+        target_type="user",
+        target_id=user_id,
+        message="User permissions updated",
+        metadata={
+            "library_ids": sorted(seen_library_ids),
+            "permission_count": len(payload),
+        },
+    )
     return session.exec(select(LibraryPermission).where(LibraryPermission.user_id == user_id)).all()
 
 
@@ -582,7 +740,7 @@ def list_shares(session: SessionDep, _: AdminUser) -> list[ShareRead]:
 
 
 @router.patch("/shares/{share_id}", response_model=ShareRead)
-def update_any_share(share_id: int, payload: ShareUpdate, session: SessionDep, _: AdminUser) -> ShareRead:
+def update_any_share(share_id: int, payload: ShareUpdate, session: SessionDep, admin: AdminUser) -> ShareRead:
     share = session.get(ShareLink, share_id)
     if not share:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Share not found")
@@ -603,11 +761,26 @@ def update_any_share(share_id: int, payload: ShareUpdate, session: SessionDep, _
     session.add(share)
     session.commit()
     session.refresh(share)
+    log_operation(
+        "share.update",
+        category="audit",
+        status="success",
+        actor_id=admin.id,
+        target_type="share",
+        target_id=share.id,
+        message="Share updated by admin",
+        metadata={
+            "share_id": share.id,
+            "title_changed": payload.title is not None,
+            "expiry_changed": payload.expires_in_days is not None,
+            "password_changed": payload.password is not None,
+        },
+    )
     return share_read(session, share)
 
 
 @router.delete("/shares/{share_id}")
-def revoke_any_share(share_id: int, session: SessionDep, _: AdminUser) -> dict[str, bool]:
+def revoke_any_share(share_id: int, session: SessionDep, admin: AdminUser) -> dict[str, bool]:
     share = session.get(ShareLink, share_id)
     if not share:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Share not found")
@@ -616,16 +789,35 @@ def revoke_any_share(share_id: int, session: SessionDep, _: AdminUser) -> dict[s
     share.revoked_at = utc_now()
     session.add(share)
     session.commit()
+    log_operation(
+        "share.revoke",
+        category="audit",
+        status="success",
+        actor_id=admin.id,
+        target_type="share",
+        target_id=share.id,
+        message="Share revoked by admin",
+        metadata={"share_id": share.id},
+    )
     return {"ok": True}
 
 
 @router.post("/maintenance/cleanup-thumbnails")
-def cleanup_thumbnails(session: SessionDep, _: AdminUser) -> dict:
+def cleanup_thumbnails(session: SessionDep, admin: AdminUser) -> dict:
     db_paths = set(
         session.exec(select(Thumbnail.path)).all()
     )
     thumbnail_root = settings.thumbnail_dir
     if not thumbnail_root.exists():
+        log_operation(
+            "maintenance.thumbnails.cleanup",
+            category="task",
+            status="success",
+            actor_id=admin.id,
+            target_type="thumbnails",
+            message="Thumbnail cleanup skipped because directory does not exist",
+            metadata={"deleted_files": 0, "freed_bytes": 0, "deleted_dirs": 0},
+        )
         return {"deleted_files": 0, "freed_bytes": 0, "deleted_dirs": 0}
 
     deleted_files = 0
@@ -648,6 +840,15 @@ def cleanup_thumbnails(session: SessionDep, _: AdminUser) -> dict:
         except OSError:
             pass
 
+    log_operation(
+        "maintenance.thumbnails.cleanup",
+        category="task",
+        status="success",
+        actor_id=admin.id,
+        target_type="thumbnails",
+        message="Thumbnail cleanup completed",
+        metadata={"deleted_files": deleted_files, "freed_bytes": freed_bytes, "deleted_dirs": deleted_dirs},
+    )
     return {"deleted_files": deleted_files, "freed_bytes": freed_bytes, "deleted_dirs": deleted_dirs}
 
 
@@ -735,31 +936,53 @@ def start_backfill_thread() -> None:
 
 
 @router.post("/maintenance/backfill-thumbnail-sizes")
-def backfill_thumbnail_sizes(session: SessionDep, _: AdminUser) -> dict:
+def backfill_thumbnail_sizes(session: SessionDep, admin: AdminUser) -> dict:
     updated = _backfill_thumbnail_sizes(session, settings.thumbnail_dir)
+    log_operation(
+        "maintenance.thumbnails.backfill",
+        category="task",
+        status="success",
+        actor_id=admin.id,
+        target_type="thumbnails",
+        message="Thumbnail size backfill completed",
+        metadata={"updated": updated},
+    )
     return {"updated": updated}
 
 
 @router.get("/settings", response_model=ServerSettingsRead)
 def get_settings(_: AdminUser) -> ServerSettingsRead:
-    import os
-
-    return ServerSettingsRead(
-        thumb_workers=get_thumb_workers(),
-        cpu_count=os.cpu_count(),
-        thumb_workers_default=settings.thumb_workers,
-    )
+    return server_settings_read()
 
 
 @router.put("/settings", response_model=ServerSettingsRead)
-def update_settings(payload: ServerSettingsUpdate, _: AdminUser) -> ServerSettingsRead:
+def update_settings(payload: ServerSettingsUpdate, admin: AdminUser) -> ServerSettingsRead:
+    set_thumb_workers(payload.thumb_workers)
+    log_operation(
+        "settings.update",
+        category="audit",
+        status="success",
+        actor_id=admin.id,
+        target_type="settings",
+        target_id="thumb_workers",
+        message="Server settings updated",
+        metadata={"thumb_workers": payload.thumb_workers},
+    )
+    return server_settings_read()
+
+
+def server_settings_read() -> ServerSettingsRead:
     import os
 
-    set_thumb_workers(payload.thumb_workers)
+    memory = resource_limits.current_memory_status()
     return ServerSettingsRead(
         thumb_workers=get_thumb_workers(),
         cpu_count=os.cpu_count(),
         thumb_workers_default=settings.thumb_workers,
+        memory_guard_enabled=memory.guard_enabled,
+        memory_total_bytes=memory.total_bytes,
+        memory_available_bytes=memory.available_bytes,
+        thumbnail_memory_budget_bytes=memory.thumbnail_budget_bytes,
     )
 
 
@@ -824,9 +1047,37 @@ async def log_stream(
     )
 
 
+@router.get("/logs/history", response_model=LogHistoryRead)
+def log_history(
+    _: AdminUser,
+    limit: int = Query(default=200, ge=1, le=500),
+    cursor: str | None = None,
+    level: str | None = None,
+    category: str | None = None,
+    search: str | None = None,
+) -> LogHistoryRead:
+    items, next_cursor = logger.read_history(
+        limit=limit,
+        cursor=cursor,
+        level=level,
+        category=category,
+        search=search,
+    )
+    return LogHistoryRead(items=items, next_cursor=next_cursor)
+
+
 @router.delete("/settings/thumb-workers-reset")
-def reset_thumb_workers_endpoint(_: AdminUser) -> dict[str, bool]:
+def reset_thumb_workers_endpoint(admin: AdminUser) -> dict[str, bool]:
     reset_thumb_workers()
+    log_operation(
+        "settings.thumb_workers.reset",
+        category="audit",
+        status="success",
+        actor_id=admin.id,
+        target_type="settings",
+        target_id="thumb_workers",
+        message="Thumbnail worker setting reset",
+    )
     return {"ok": True}
 
 
@@ -893,7 +1144,15 @@ def processing_errors_stats(session: SessionDep, _: AdminUser) -> ProcessingErro
 
 
 @router.delete("/processing-errors")
-def clear_processing_errors(session: SessionDep, _: AdminUser) -> dict[str, bool]:
+def clear_processing_errors(session: SessionDep, admin: AdminUser) -> dict[str, bool]:
     session.exec(delete(ProcessingError))
     session.commit()
+    log_operation(
+        "processing_errors.clear",
+        category="audit",
+        status="success",
+        actor_id=admin.id,
+        target_type="processing_errors",
+        message="Processing errors cleared",
+    )
     return {"ok": True}

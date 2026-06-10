@@ -1,5 +1,5 @@
 import { computed, ref } from 'vue';
-import { logStreamUrl } from '../services/api';
+import { api, logStreamUrl } from '../services/api';
 import type { LogEntry } from '../types';
 
 export type LogStreamStatus = 'disconnected' | 'connecting' | 'connected' | 'reconnecting' | 'error';
@@ -12,15 +12,19 @@ interface UseLogStreamOptions {
   tail?: number;
   maxEntries?: number;
   retryDelaysMs?: number[];
+  loadHistory?: boolean;
 }
 
 export function useLogStream(options: UseLogStreamOptions = {}) {
   const tail = options.tail ?? DEFAULT_TAIL;
   const maxEntries = options.maxEntries ?? DEFAULT_MAX_ENTRIES;
   const retryDelaysMs = options.retryDelaysMs?.length ? options.retryDelaysMs : DEFAULT_RETRY_DELAYS_MS;
+  const shouldLoadHistory = options.loadHistory ?? true;
 
   const logs = ref<LogEntry[]>([]);
   const status = ref<LogStreamStatus>('disconnected');
+  const loadingHistory = ref(false);
+  const historyError = ref<string | null>(null);
   const connected = computed(() => status.value === 'connected');
 
   let eventSource: EventSource | null = null;
@@ -28,6 +32,7 @@ export function useLogStream(options: UseLogStreamOptions = {}) {
   let retryAttempt = 0;
   let lastSeenId: number | null = null;
   let manuallyClosed = false;
+  let connectVersion = 0;
 
   function clearReconnectTimer() {
     if (reconnectTimer) {
@@ -53,6 +58,26 @@ export function useLogStream(options: UseLogStreamOptions = {}) {
     }
   }
 
+  async function loadInitialHistory(version: number) {
+    if (!shouldLoadHistory || lastSeenId !== null) return;
+    loadingHistory.value = true;
+    historyError.value = null;
+    try {
+      const history = await api.logHistory({ limit: tail });
+      if (version !== connectVersion || manuallyClosed) return;
+      for (const entry of [...history.items].reverse()) {
+        appendEntry(entry);
+      }
+    } catch (error) {
+      if (version !== connectVersion || manuallyClosed) return;
+      historyError.value = error instanceof Error ? error.message : 'Failed to load log history';
+    } finally {
+      if (version === connectVersion) {
+        loadingHistory.value = false;
+      }
+    }
+  }
+
   function scheduleReconnect(source: EventSource) {
     if (reconnectTimer || manuallyClosed) return;
     source.close();
@@ -64,12 +89,14 @@ export function useLogStream(options: UseLogStreamOptions = {}) {
     reconnectTimer = setTimeout(() => {
       reconnectTimer = null;
       retryAttempt += 1;
-      connect();
+      void connect();
     }, delay);
   }
 
-  function connect() {
+  async function connect() {
     manuallyClosed = false;
+    const version = connectVersion + 1;
+    connectVersion = version;
     clearReconnectTimer();
     if (eventSource) {
       eventSource.close();
@@ -77,6 +104,9 @@ export function useLogStream(options: UseLogStreamOptions = {}) {
     }
 
     status.value = lastSeenId === null ? 'connecting' : 'reconnecting';
+    await loadInitialHistory(version);
+    if (version !== connectVersion || manuallyClosed) return;
+
     let source: EventSource;
     try {
       source = new EventSource(streamUrl(), { withCredentials: true });
@@ -109,6 +139,7 @@ export function useLogStream(options: UseLogStreamOptions = {}) {
 
   function disconnect() {
     manuallyClosed = true;
+    connectVersion += 1;
     clearReconnectTimer();
     if (eventSource) {
       eventSource.close();
@@ -124,6 +155,8 @@ export function useLogStream(options: UseLogStreamOptions = {}) {
   return {
     logs,
     status,
+    loadingHistory,
+    historyError,
     connected,
     connect,
     disconnect,

@@ -90,6 +90,34 @@ def test_admin_filesystem_requires_auth(tmp_path: Path) -> None:
     app.dependency_overrides.clear()
 
 
+def test_admin_settings_include_thumbnail_memory_guard_status(tmp_path: Path, monkeypatch) -> None:
+    from app.services import resource_limits
+
+    monkeypatch.setattr(
+        resource_limits,
+        "current_memory_status",
+        lambda: resource_limits.MemoryStatus(
+            guard_enabled=True,
+            total_bytes=6 * 1024 * 1024 * 1024,
+            available_bytes=4 * 1024 * 1024 * 1024,
+            thumbnail_budget_bytes=2 * 1024 * 1024 * 1024,
+        ),
+    )
+
+    client, _ = isolated_client(tmp_path)
+    with client:
+        login(client, "admin@example.com", "change-me-now")
+        response = client.get("/api/admin/settings")
+
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["memory_guard_enabled"] is True
+    assert data["memory_total_bytes"] == 6 * 1024 * 1024 * 1024
+    assert data["memory_available_bytes"] == 4 * 1024 * 1024 * 1024
+    assert data["thumbnail_memory_budget_bytes"] == 2 * 1024 * 1024 * 1024
+    app.dependency_overrides.clear()
+
+
 def test_admin_can_manage_users_and_permissions(tmp_path: Path) -> None:
     email = f"member-{tmp_path.name}@example.com"
     client, _ = isolated_client(tmp_path)

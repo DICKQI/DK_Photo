@@ -11,6 +11,7 @@ from sqlmodel import Session, SQLModel, create_engine, select
 from app.config import settings
 from app.db import disable_legacy_docker_photos_root_library, mark_interrupted_scan_jobs
 from app.models import Asset, Folder, LibraryRoot, ProcessingError, ScanJob, Thumbnail
+from app.services import scanner
 from app.services.scanner import (
     active_scan_job,
     get_image_metadata,
@@ -105,11 +106,14 @@ def test_supported_formats_skip_heic() -> None:
     assert is_supported_image(Path("a.PNG"))
     assert is_supported_image(Path("a.webp"))
     assert is_supported_image(Path("a.gif"))
+    assert not is_supported_image(Path("._a.PNG"))
     assert not is_supported_image(Path("a.heic"))
     assert not is_supported_image(Path("a.mov"))
     assert is_supported_video(Path("clip.MOV"))
     assert is_supported_video(Path("clip.mp4"))
+    assert not is_supported_video(Path("._clip.MOV"))
     assert is_supported_media(Path("clip.mp4"))
+    assert not is_supported_media(Path("._clip.mp4"))
 
 
 def test_scan_library_skips_docker_photos_mount_root(tmp_path: Path) -> None:
@@ -163,6 +167,25 @@ def test_scan_library_creates_folders_and_assets(tmp_path: Path) -> None:
         assert video.mime_type == "video/mp4"
         assert video.width is None
         assert video.height is None
+
+
+def test_scan_library_skips_appledouble_resource_files(tmp_path: Path) -> None:
+    photo_root = tmp_path / "appledouble"
+    create_photo(photo_root / "one.png")
+    (photo_root / "._one.png").write_bytes(b"not a real image resource fork")
+
+    with make_session(tmp_path) as session:
+        library = LibraryRoot(name="AppleDouble", path=str(photo_root.resolve()))
+        session.add(library)
+        session.commit()
+        session.refresh(library)
+
+        total = scan_library(session, library.id or 0)
+
+        assert total == 1
+        asset = session.exec(select(Asset)).one()
+        assert asset.filename == "one.png"
+        assert session.exec(select(ProcessingError)).all() == []
 
 
 def test_scan_library_extracts_photo_exif_metadata(tmp_path: Path) -> None:
@@ -527,6 +550,34 @@ def test_pipeline_generates_thumbnails_for_images(tmp_path: Path) -> None:
         object.__setattr__(settings, "data_dir", old_data_dir)
 
 
+def test_pipeline_uses_real_asset_ids_for_batched_new_image_thumbnails(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    old_data_dir = settings.data_dir
+    object.__setattr__(settings, "data_dir", (tmp_path / "data").resolve())
+    monkeypatch.setattr(scanner, "BATCH_SIZE", 2)
+    try:
+        photo_root = tmp_path / "batched-new-thumbs"
+        for i in range(3):
+            create_photo(photo_root / f"img{i}.jpg")
+
+        with make_session(tmp_path) as session:
+            library = LibraryRoot(name="Batched New Thumbs", path=str(photo_root.resolve()))
+            session.add(library)
+            session.commit()
+            session.refresh(library)
+
+            total = scan_library(session, library.id or 0, generate_thumbnails=True)
+            assert total == 3
+
+            assets = session.exec(select(Asset)).all()
+            asset_ids = {asset.id for asset in assets}
+            thumbnails = session.exec(select(Thumbnail)).all()
+            assert len(thumbnails) == 6
+            assert {thumbnail.asset_id for thumbnail in thumbnails} == asset_ids
+            assert 0 not in {thumbnail.asset_id for thumbnail in thumbnails}
+    finally:
+        object.__setattr__(settings, "data_dir", old_data_dir)
+
+
 def test_pipeline_skips_unchanged_images(tmp_path: Path) -> None:
     old_data_dir = settings.data_dir
     object.__setattr__(settings, "data_dir", (tmp_path / "data").resolve())
@@ -632,6 +683,63 @@ def test_scan_library_records_metadata_error_for_corrupt_image(tmp_path: Path) -
         error = session.exec(select(ProcessingError)).one()
         assert error.error_type == "metadata"
         assert error.asset_path == "bad.jpg"
+
+
+def test_scan_library_records_oversized_image_without_thumbnailing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    old_data_dir = settings.data_dir
+    object.__setattr__(settings, "data_dir", (tmp_path / "data").resolve())
+    monkeypatch.setattr(scanner.Image, "MAX_IMAGE_PIXELS", 100)
+    try:
+        photo_root = tmp_path / "oversized"
+        oversized = photo_root / "huge.png"
+        oversized.parent.mkdir(parents=True, exist_ok=True)
+        Image.new("RGB", (11, 10), "#5b8def").save(oversized)
+
+        with make_session(tmp_path) as session:
+            library = LibraryRoot(name="Oversized", path=str(photo_root.resolve()))
+            session.add(library)
+            session.commit()
+            session.refresh(library)
+
+            total = scan_library(session, library.id or 0, generate_thumbnails=True)
+
+            assert total == 1
+            asset = session.exec(select(Asset)).one()
+            assert asset.width is None
+            assert session.exec(select(Thumbnail)).all() == []
+            error = session.exec(select(ProcessingError)).one()
+            assert error.error_type == "metadata"
+            assert "像素过大" in error.error_message
+    finally:
+        object.__setattr__(settings, "data_dir", old_data_dir)
+
+
+def test_generate_thumbnail_disk_only_reports_memory_budget_exhaustion(tmp_path: Path) -> None:
+    from app.services.resource_limits import MemoryAdmissionController, MemorySnapshot
+    from app.services.thumbnails import generate_thumbnail_disk_only
+
+    photo_root = tmp_path / "memory-budget"
+    create_photo(photo_root / "one.jpg")
+    controller = MemoryAdmissionController(
+        snapshot_provider=lambda: MemorySnapshot(total=512 * 1024 * 1024, available=128 * 1024 * 1024),
+        min_system_reserved=128 * 1024 * 1024,
+        max_budget_fraction=1.0,
+    )
+
+    result = generate_thumbnail_disk_only(
+        asset_id=1,
+        library_path=str(photo_root),
+        asset_path="one.jpg",
+        mtime=(photo_root / "one.jpg").stat().st_mtime,
+        mime_type="image/jpeg",
+        size="small",
+        memory_controller=controller,
+    )
+
+    assert result is not None
+    assert result["error"] is True
+    assert result["error_type"] == "memory"
+    assert "内存" in result["message"]
 
 
 def test_pipeline_empty_library_no_thumbnails(tmp_path: Path) -> None:
