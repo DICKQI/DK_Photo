@@ -5,12 +5,12 @@ import json
 import logging
 import threading
 from collections import deque
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from app.config import settings
 from app.schemas import LogEntry
+from app.timezone import format_app_timestamp
 
 
 RING_BUFFER_SIZE = 2000
@@ -49,10 +49,7 @@ class LogBroker:
 
     def publish(self, record: logging.LogRecord) -> None:
         try:
-            timestamp = (
-                datetime.fromtimestamp(record.created, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-                + f",{record.msecs:03.0f}"
-            )
+            timestamp = format_app_timestamp(record.created, record.msecs)
             message = record.getMessage()
         except Exception:
             return

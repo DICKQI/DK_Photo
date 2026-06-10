@@ -66,6 +66,8 @@ describe('useLocale helpers', () => {
     expect(translateWithLocale('en', 'admin.scanMediaProgressTotal', { count: '40,700', total: '739,497' })).toBe('Media 40,700 / 739,497');
     expect(translateWithLocale('en', 'admin.scanImageProgressTotal', { count: '39,800', total: '720,000' })).toBe('Images 39,800 / 720,000');
     expect(translateWithLocale('en', 'admin.scanThumbnailReadyImages', { count: '12,340', total: '39,800' })).toBe('Thumbnails ready 12,340 / 39,800');
+    expect(translateWithLocale('en', 'admin.scanJobs')).toBe('Background Tasks');
+    expect(translateWithLocale('en', 'admin.deleteProgressTotal', { phase: 'Deleting media', count: '45,000', total: '100,000', percent: 45 })).toBe('Deleting media 45,000 / 100,000 (45%)');
     expect(translateWithLocale('en', 'album.favoriteSelected')).toBe('Favorite selected');
     expect(translateWithLocale('en', 'album.addAlbumSelectionHint', { count: 2 })).toBe('2 selected media items will be added.');
     expect(translateWithLocale('en', 'share.available', { media: '2 media items' })).toBe('2 media items available from this shared link.');
@@ -127,8 +129,9 @@ describe('useLocale helpers', () => {
     expect(translateWithLocale('zh-CN', 'admin.searchShares')).toBe('搜索分享链接');
     expect(translateWithLocale('zh-CN', 'admin.allShareStatuses')).toBe('全部状态');
     expect(translateWithLocale('zh-CN', 'admin.noMatchingLibraries')).toBe('没有匹配的图库');
-    expect(translateWithLocale('zh-CN', 'admin.noMatchingScanJobs')).toBe('没有匹配的扫描任务');
+    expect(translateWithLocale('zh-CN', 'admin.noMatchingScanJobs')).toBe('没有匹配的后台任务');
     expect(translateWithLocale('zh-CN', 'admin.scanMediaProgressTotal', { count: '40,700', total: '739,497' })).toBe('媒体 40,700 / 739,497');
+    expect(translateWithLocale('zh-CN', 'admin.deletePhaseAssets')).toBe('正在清理媒体');
     expect(translateWithLocale('zh-CN', 'admin.scanImageProgressTotal', { count: '39,800', total: '720,000' })).toBe('已发现图片 39,800 / 720,000');
     expect(translateWithLocale('zh-CN', 'admin.scanThumbnailReadyImages', { count: '12,340', total: '39,800' })).toBe('缩略图已就绪 12,340 / 39,800');
     expect(translateWithLocale('zh-CN', 'album.noPhotosHere')).toBe('这里还没有媒体');

@@ -39,6 +39,15 @@ class LibraryRead(BaseModel):
     created_at: datetime
     last_scan_at: Optional[datetime]
     deleted_at: Optional[datetime] = None
+    delete_status: Optional[str] = None
+    delete_phase: Optional[str] = None
+    delete_message: str = ""
+    delete_total_assets: int = 0
+    delete_processed_assets: int = 0
+    delete_total_folders: int = 0
+    delete_processed_folders: int = 0
+    delete_started_at: Optional[datetime] = None
+    delete_updated_at: Optional[datetime] = None
 
 
 class FolderRead(BaseModel):

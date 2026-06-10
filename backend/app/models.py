@@ -1,15 +1,12 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Optional
 
 from sqlmodel import Field, Index, SQLModel, UniqueConstraint
 
+from app.timezone import utc_now
 from app.types import UTCDateTime
-
-
-def utc_now() -> datetime:
-    return datetime.now(timezone.utc)
 
 
 class User(SQLModel, table=True):
@@ -44,6 +41,15 @@ class LibraryRoot(SQLModel, table=True):
     created_at: datetime = Field(default_factory=utc_now, sa_type=UTCDateTime)
     last_scan_at: Optional[datetime] = Field(default=None, sa_type=UTCDateTime)
     deleted_at: Optional[datetime] = Field(default=None, index=True, sa_type=UTCDateTime)
+    delete_status: Optional[str] = Field(default=None, index=True)
+    delete_phase: Optional[str] = Field(default=None, index=True)
+    delete_message: str = Field(default="")
+    delete_total_assets: int = Field(default=0)
+    delete_processed_assets: int = Field(default=0)
+    delete_total_folders: int = Field(default=0)
+    delete_processed_folders: int = Field(default=0)
+    delete_started_at: Optional[datetime] = Field(default=None, sa_type=UTCDateTime)
+    delete_updated_at: Optional[datetime] = Field(default=None, sa_type=UTCDateTime)
 
 
 class Folder(SQLModel, table=True):

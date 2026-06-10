@@ -138,3 +138,23 @@ def test_setup_logging_is_idempotent() -> None:
         assert len(entries) == 1
     finally:
         logger._reset_for_tests()
+
+
+def test_log_timestamps_are_formatted_in_utc_plus_8() -> None:
+    broker = logger.LogBroker()
+    record = logging.LogRecord(
+        name="tests.admin_logs",
+        level=logging.INFO,
+        pathname=__file__,
+        lineno=1,
+        msg="timezone check",
+        args=(),
+        exc_info=None,
+    )
+    record.created = 0
+    record.msecs = 0.0
+
+    broker.publish(record)
+
+    entry = broker.get_recent(tail=1)[0]
+    assert entry.timestamp == "1970-01-01 08:00:00,000"

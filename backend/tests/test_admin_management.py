@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 from datetime import datetime
 from io import BytesIO
 from pathlib import Path
@@ -7,12 +8,30 @@ from zipfile import ZipFile
 
 from fastapi.testclient import TestClient
 from PIL import Image
+from sqlalchemy import event, inspect, text
 from sqlmodel import Session, SQLModel, create_engine, select
 
 from app.config import settings
-from app.db import ensure_initial_admin, get_session
+from app.db import ensure_initial_admin, get_session, run_lightweight_migrations
 from app.main import app
-from app.models import Asset, AssetMetadata, AssetTag, Folder, LibraryPermission, LibraryRoot, ScanJob, ShareLink, Thumbnail, User
+from app.models import (
+    Asset,
+    AssetFavorite,
+    AssetMetadata,
+    AssetTag,
+    Folder,
+    LibraryPermission,
+    LibraryRoot,
+    PhotoAlbum,
+    PhotoAlbumAsset,
+    ProcessingError,
+    ScanJob,
+    ShareAsset,
+    ShareLink,
+    Thumbnail,
+    User,
+    utc_now,
+)
 from app.security import hash_password, verify_password
 from app.services.scanner import scan_library
 
@@ -186,6 +205,47 @@ def test_admin_can_update_library_name(tmp_path: Path) -> None:
         missing_response = client.patch("/api/admin/libraries/999999", json={"name": "Missing"})
         assert missing_response.status_code == 404
     app.dependency_overrides.clear()
+
+
+def test_lightweight_migrations_add_library_delete_progress_columns(tmp_path: Path, monkeypatch) -> None:
+    from app import db as app_db
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'library-delete-migration.sqlite3'}", connect_args={"check_same_thread": False})
+    SQLModel.metadata.create_all(engine)
+    with engine.begin() as connection:
+        connection.execute(text("DROP TABLE libraryroot"))
+        connection.execute(
+            text(
+                """
+                CREATE TABLE libraryroot (
+                    id INTEGER PRIMARY KEY,
+                    name VARCHAR NOT NULL,
+                    path VARCHAR NOT NULL UNIQUE,
+                    is_enabled BOOLEAN NOT NULL DEFAULT 1,
+                    watch_enabled BOOLEAN NOT NULL DEFAULT 0,
+                    created_at DATETIME NOT NULL,
+                    last_scan_at DATETIME,
+                    deleted_at DATETIME
+                )
+                """
+            )
+        )
+    monkeypatch.setattr(app_db, "engine", engine)
+
+    run_lightweight_migrations()
+
+    columns = {column["name"] for column in inspect(engine).get_columns("libraryroot")}
+    assert {
+        "delete_status",
+        "delete_phase",
+        "delete_message",
+        "delete_total_assets",
+        "delete_processed_assets",
+        "delete_total_folders",
+        "delete_processed_folders",
+        "delete_started_at",
+        "delete_updated_at",
+    }.issubset(columns)
 
 
 def test_member_cannot_update_or_delete_libraries(tmp_path: Path) -> None:
@@ -508,6 +568,230 @@ def test_delete_library_removes_index_and_keeps_original_files(tmp_path: Path) -
     app.dependency_overrides.clear()
 
 
+def test_delete_library_sets_initial_progress_fields_and_exposes_them(tmp_path: Path) -> None:
+    client, test_engine = isolated_client(tmp_path)
+    photo_root = tmp_path / "progress-delete-photos"
+    create_photo(photo_root / "Trips" / "one.jpg")
+
+    with client:
+        login(client, "admin@example.com", "change-me-now")
+        library_response = client.post("/api/admin/libraries", json={"name": "Progress delete", "path": str(photo_root)})
+        assert library_response.status_code == 200, library_response.text
+        library_id = library_response.json()["id"]
+
+        with Session(test_engine) as session:
+            scan_library(session, library_id)
+
+        delete_response = client.delete(f"/api/admin/libraries/{library_id}")
+        assert delete_response.status_code == 200, delete_response.text
+
+        with Session(test_engine) as session:
+            library = session.get(LibraryRoot, library_id)
+            assert library is not None
+            assert library.deleted_at is not None
+            assert library.delete_status == "queued"
+            assert library.delete_phase == "counting"
+            assert library.delete_message == "Delete queued"
+            assert library.delete_total_assets == 0
+            assert library.delete_processed_assets == 0
+            assert library.delete_total_folders == 0
+            assert library.delete_processed_folders == 0
+            assert library.delete_started_at is not None
+            assert library.delete_updated_at is not None
+
+        libraries_response = client.get("/api/admin/libraries")
+        assert libraries_response.status_code == 200, libraries_response.text
+        deleted_library = next(item for item in libraries_response.json() if item["id"] == library_id)
+        assert deleted_library["delete_status"] == "queued"
+        assert deleted_library["delete_phase"] == "counting"
+        assert deleted_library["delete_message"] == "Delete queued"
+        assert deleted_library["delete_total_assets"] == 0
+        assert deleted_library["delete_processed_assets"] == 0
+        assert deleted_library["delete_total_folders"] == 0
+        assert deleted_library["delete_processed_folders"] == 0
+        assert deleted_library["delete_started_at"] is not None
+        assert deleted_library["delete_updated_at"] is not None
+
+    app.dependency_overrides.clear()
+
+
+def test_delete_library_cleanup_marks_failed_progress(tmp_path: Path, monkeypatch) -> None:
+    from app import db as app_db
+    from app.api import admin as admin_api
+    from app.api.admin import _delete_library_cleanup
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'failed-delete.sqlite3'}", connect_args={"check_same_thread": False})
+    SQLModel.metadata.create_all(engine)
+    monkeypatch.setattr(app_db, "engine", engine)
+
+    with Session(engine) as session:
+        library = LibraryRoot(
+            name="Failed delete",
+            path=str(tmp_path / "photos"),
+            is_enabled=False,
+            deleted_at=utc_now(),
+            delete_status="queued",
+            delete_phase="counting",
+            delete_message="Delete queued",
+        )
+        session.add(library)
+        session.commit()
+        session.refresh(library)
+        folder = Folder(library_id=library.id or 0, path="", name="photos")
+        session.add(folder)
+        session.commit()
+        session.refresh(folder)
+        asset = Asset(
+            library_id=library.id or 0,
+            folder_id=folder.id or 0,
+            filename="broken.jpg",
+            path="broken.jpg",
+            mime_type="image/jpeg",
+            size=1,
+            mtime=1,
+        )
+        session.add(asset)
+        session.commit()
+        session.refresh(asset)
+        session.add(Thumbnail(asset_id=asset.id or 0, size="small", path=str(tmp_path / "thumb.webp"), width=16, height=16))
+        session.commit()
+        library_id = library.id or 0
+
+    def fail_unlink(_path: str) -> None:
+        raise RuntimeError("thumbnail boom")
+
+    monkeypatch.setattr(admin_api, "_unlink_thumbnail_file", fail_unlink)
+
+    _delete_library_cleanup(library_id)
+
+    with Session(engine) as session:
+        library = session.get(LibraryRoot, library_id)
+        assert library is not None
+        assert library.delete_status == "failed"
+        assert library.delete_phase == "failed"
+        assert "thumbnail boom" in library.delete_message
+        assert library.delete_updated_at is not None
+
+
+def test_delete_library_cleanup_chunks_asset_ids_under_sqlite_variable_limit(tmp_path: Path, monkeypatch) -> None:
+    from app import db as app_db
+    from app.api import admin as admin_api
+    from app.api.admin import _delete_library_cleanup
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'chunked-delete.sqlite3'}", connect_args={"check_same_thread": False})
+
+    @event.listens_for(engine, "connect")
+    def lower_sqlite_variable_limit(dbapi_connection, _connection_record) -> None:
+        dbapi_connection.setlimit(sqlite3.SQLITE_LIMIT_VARIABLE_NUMBER, 50)
+
+    SQLModel.metadata.create_all(engine)
+    monkeypatch.setattr(app_db, "engine", engine)
+    monkeypatch.setattr(admin_api, "LIBRARY_DELETE_CHUNK_SIZE", 20, raising=False)
+
+    with Session(engine) as session:
+        admin_user = User(
+            email="chunked-admin@example.com",
+            display_name="Chunked Admin",
+            role="admin",
+            password_hash=hash_password("change-me-now"),
+        )
+        library = LibraryRoot(name="Chunked delete", path=str(tmp_path / "photos"), is_enabled=False)
+        session.add(admin_user)
+        session.add(library)
+        session.commit()
+        session.refresh(admin_user)
+        session.refresh(library)
+        folder = Folder(library_id=library.id or 0, path="", name="photos")
+        session.add(folder)
+        session.commit()
+        session.refresh(folder)
+        library_id = library.id or 0
+        folder_id = folder.id or 0
+
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                INSERT INTO asset (library_id, folder_id, filename, path, mime_type, size, mtime, created_at, updated_at)
+                VALUES (:library_id, :folder_id, :filename, :path, 'image/jpeg', 1, :mtime, '2026-01-01 00:00:00', '2026-01-01 00:00:00')
+                """
+            ),
+            [
+                {
+                    "library_id": library_id,
+                    "folder_id": folder_id,
+                    "filename": f"{index}.jpg",
+                    "path": f"{index}.jpg",
+                    "mtime": float(index),
+                }
+                for index in range(60)
+            ],
+        )
+
+    thumbnail_path = settings.thumbnail_dir / "pytest-chunked-delete" / f"{tmp_path.name}.webp"
+    thumbnail_path.parent.mkdir(parents=True, exist_ok=True)
+    thumbnail_path.write_bytes(b"thumbnail")
+
+    with Session(engine) as session:
+        asset_ids = session.exec(select(Asset.id).order_by(Asset.id).limit(2)).all()
+        assert len(asset_ids) == 2
+        first_asset_id, second_asset_id = asset_ids
+        admin_user = session.exec(select(User).where(User.email == "chunked-admin@example.com")).one()
+        album = PhotoAlbum(owner_id=admin_user.id or 0, name="Cleanup Album", cover_asset_id=first_asset_id)
+        direct_asset_share = ShareLink(
+            token=f"chunked-direct-asset-{tmp_path.name}",
+            creator_id=admin_user.id or 0,
+            title="Direct Asset",
+            asset_id=first_asset_id,
+        )
+        direct_folder_share = ShareLink(
+            token=f"chunked-direct-folder-{tmp_path.name}",
+            creator_id=admin_user.id or 0,
+            title="Direct Folder",
+            folder_id=folder_id,
+        )
+        multi_share = ShareLink(
+            token=f"chunked-multi-{tmp_path.name}",
+            creator_id=admin_user.id or 0,
+            title="Multi Asset",
+        )
+        session.add(album)
+        session.add(direct_asset_share)
+        session.add(direct_folder_share)
+        session.add(multi_share)
+        session.flush()
+        session.add(AssetFavorite(user_id=admin_user.id or 0, asset_id=first_asset_id))
+        session.add(AssetTag(user_id=admin_user.id or 0, asset_id=first_asset_id, name="Cleanup"))
+        session.add(AssetMetadata(user_id=admin_user.id or 0, asset_id=first_asset_id, rating=5))
+        session.add(PhotoAlbumAsset(album_id=album.id or 0, asset_id=first_asset_id))
+        session.add(ShareAsset(share_id=multi_share.id or 0, asset_id=first_asset_id))
+        session.add(ShareAsset(share_id=multi_share.id or 0, asset_id=second_asset_id))
+        session.add(Thumbnail(asset_id=first_asset_id, size="small", path=str(thumbnail_path), width=16, height=16))
+        session.add(LibraryPermission(user_id=admin_user.id or 0, library_id=library_id, can_view=True))
+        session.add(ProcessingError(library_id=library_id, asset_path="0.jpg", filename="0.jpg", error_type="metadata"))
+        session.add(ScanJob(library_id=library_id, status="finished", message="Done"))
+        session.commit()
+
+    _delete_library_cleanup(library_id)
+
+    with Session(engine) as session:
+        assert session.exec(select(Asset)).all() == []
+        assert session.exec(select(Folder)).all() == []
+        assert session.exec(select(AssetFavorite)).all() == []
+        assert session.exec(select(AssetTag)).all() == []
+        assert session.exec(select(AssetMetadata)).all() == []
+        assert session.exec(select(PhotoAlbumAsset)).all() == []
+        assert session.exec(select(ShareAsset)).all() == []
+        assert session.exec(select(ShareLink)).all() == []
+        assert session.exec(select(Thumbnail)).all() == []
+        assert session.exec(select(LibraryPermission)).all() == []
+        assert session.exec(select(ProcessingError)).all() == []
+        assert session.exec(select(ScanJob)).all() == []
+        assert session.exec(select(PhotoAlbum)).one().cover_asset_id is None
+        assert session.get(LibraryRoot, library_id) is None
+    assert not thumbnail_path.exists()
+
+
 def test_member_library_access_is_filtered(tmp_path: Path) -> None:
     email = f"filtered-{tmp_path.name}@example.com"
     allowed_root = tmp_path / "allowed"
@@ -672,7 +956,7 @@ def test_assets_can_filter_photos_with_location(tmp_path: Path) -> None:
                 "longitude": -122.40,
                 "asset_count": 2,
                 "cover_asset_id": nearby_id,
-                "latest_at": "2024-05-13T10:30:00Z",
+                "latest_at": "2024-05-13T02:30:00Z",
             }
         ]
         assert filenames(client.get("/api/assets?place=37.81,-122.40")) == {"mapped.jpg", "nearby.jpg"}
@@ -684,7 +968,7 @@ def test_assets_can_filter_photos_with_location(tmp_path: Path) -> None:
                 "longitude": -122.40,
                 "asset_count": 1,
                 "cover_asset_id": mapped_id,
-                "latest_at": "2024-05-12T10:30:00Z",
+                "latest_at": "2024-05-12T02:30:00Z",
             }
         ]
         assert client.get("/api/assets?place=Unknown").json() == []

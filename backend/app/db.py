@@ -106,6 +106,21 @@ def run_lightweight_migrations() -> None:
     if "watch_enabled" not in library_columns:
         with engine.begin() as connection:
             connection.execute(text("ALTER TABLE libraryroot ADD COLUMN watch_enabled BOOLEAN NOT NULL DEFAULT 0"))
+    library_delete_migrations = {
+        "delete_status": "ALTER TABLE libraryroot ADD COLUMN delete_status VARCHAR",
+        "delete_phase": "ALTER TABLE libraryroot ADD COLUMN delete_phase VARCHAR",
+        "delete_message": "ALTER TABLE libraryroot ADD COLUMN delete_message VARCHAR NOT NULL DEFAULT ''",
+        "delete_total_assets": "ALTER TABLE libraryroot ADD COLUMN delete_total_assets INTEGER NOT NULL DEFAULT 0",
+        "delete_processed_assets": "ALTER TABLE libraryroot ADD COLUMN delete_processed_assets INTEGER NOT NULL DEFAULT 0",
+        "delete_total_folders": "ALTER TABLE libraryroot ADD COLUMN delete_total_folders INTEGER NOT NULL DEFAULT 0",
+        "delete_processed_folders": "ALTER TABLE libraryroot ADD COLUMN delete_processed_folders INTEGER NOT NULL DEFAULT 0",
+        "delete_started_at": "ALTER TABLE libraryroot ADD COLUMN delete_started_at DATETIME",
+        "delete_updated_at": "ALTER TABLE libraryroot ADD COLUMN delete_updated_at DATETIME",
+    }
+    with engine.begin() as connection:
+        for column, statement in library_delete_migrations.items():
+            if column not in library_columns:
+                connection.execute(text(statement))
     thumbnail_columns = {column["name"] for column in inspector.get_columns("thumbnail")} if inspector.has_table("thumbnail") else set()
     if "file_size" not in thumbnail_columns:
         with engine.begin() as connection:

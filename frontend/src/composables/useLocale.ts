@@ -435,18 +435,18 @@ const en = {
   'admin.noMatchingUsersHint': 'Adjust the search text, status, or role filters.',
   'admin.clearFilters': 'Clear filters',
   'admin.userLibraries': 'Libraries',
-  'admin.scanJobs': 'Scan Jobs',
+  'admin.scanJobs': 'Background Tasks',
   'admin.statusFinished': 'Finished',
   'admin.statusFailed': 'Failed',
   'admin.statusRunning': 'Running',
   'admin.statusQueued': 'Queued',
-  'admin.searchScanJobs': 'Search scan jobs',
+  'admin.searchScanJobs': 'Search background tasks',
   'admin.filterJobStatus': 'Filter job status',
   'admin.allStatuses': 'All statuses',
-  'admin.noScanJobs': 'No scan jobs',
-  'admin.noScanJobsHint': 'Start a library scan to see progress here.',
-  'admin.noMatchingScanJobs': 'No matching scan jobs',
-  'admin.noMatchingScanJobsHint': 'Adjust the scan job search or status filter.',
+  'admin.noScanJobs': 'No background tasks',
+  'admin.noScanJobsHint': 'Start a scan or delete a library to see progress here.',
+  'admin.noMatchingScanJobs': 'No matching background tasks',
+  'admin.noMatchingScanJobsHint': 'Adjust the task search or status filter.',
   'admin.scanningProgress': '{count} indexed',
   'admin.scanningProgressTotal': '{count} / {total} indexed',
   'admin.scanMediaProgress': 'Media {count}',
@@ -456,6 +456,15 @@ const en = {
   'admin.scanVideoProgress': 'Videos {count}',
   'admin.scanVideoProgressTotal': 'Videos {count} / {total}',
   'admin.scanThumbnailReadyImages': 'Thumbnails ready {count} / {total}',
+  'admin.deletePhaseCounting': 'Counting media and folders',
+  'admin.deletePhaseAssets': 'Deleting media',
+  'admin.deletePhaseFolders': 'Deleting folders',
+  'admin.deletePhaseFinalizing': 'Finalizing',
+  'admin.deletePhaseFailed': 'Deletion failed',
+  'admin.deleteProgressTotal': '{phase} {count} / {total} ({percent}%)',
+  'admin.deleteProgressNoTotal': '{phase}',
+  'admin.deleteFailedWithMessage': '{phase}: {message}',
+  'admin.deleteTaskLabel': 'Delete library',
   'scan.indicatorTitle': 'Scan job status',
   'scan.activeJobs': 'Active scan jobs',
   'scan.imagesCompact': 'Images {count}',
@@ -1134,18 +1143,18 @@ const zhCN: Record<keyof typeof en, string> = {
   'admin.noMatchingUsersHint': '调整搜索文本、状态或角色筛选。',
   'admin.clearFilters': '清除筛选',
   'admin.userLibraries': '图库',
-  'admin.scanJobs': '扫描任务',
+  'admin.scanJobs': '后台任务',
   'admin.statusFinished': '已完成',
   'admin.statusFailed': '失败',
   'admin.statusRunning': '运行中',
   'admin.statusQueued': '已排队',
-  'admin.searchScanJobs': '搜索扫描任务',
+  'admin.searchScanJobs': '搜索后台任务',
   'admin.filterJobStatus': '筛选任务状态',
   'admin.allStatuses': '全部状态',
-  'admin.noScanJobs': '暂无扫描任务',
-  'admin.noScanJobsHint': '启动图库扫描后可在这里查看进度。',
-  'admin.noMatchingScanJobs': '没有匹配的扫描任务',
-  'admin.noMatchingScanJobsHint': '调整扫描任务搜索或状态筛选。',
+  'admin.noScanJobs': '暂无后台任务',
+  'admin.noScanJobsHint': '启动图库扫描或删除图库后可在这里查看进度。',
+  'admin.noMatchingScanJobs': '没有匹配的后台任务',
+  'admin.noMatchingScanJobsHint': '调整任务搜索或状态筛选。',
   'admin.scanningProgress': '{count} 已索引',
   'admin.scanningProgressTotal': '{count} / {total} 已索引',
   'admin.scanMediaProgress': '媒体 {count}',
@@ -1155,6 +1164,15 @@ const zhCN: Record<keyof typeof en, string> = {
   'admin.scanVideoProgress': '视频 {count}',
   'admin.scanVideoProgressTotal': '视频 {count} / {total}',
   'admin.scanThumbnailReadyImages': '缩略图已就绪 {count} / {total}',
+  'admin.deletePhaseCounting': '正在统计媒体和文件夹',
+  'admin.deletePhaseAssets': '正在清理媒体',
+  'admin.deletePhaseFolders': '正在清理文件夹',
+  'admin.deletePhaseFinalizing': '正在收尾',
+  'admin.deletePhaseFailed': '删除失败',
+  'admin.deleteProgressTotal': '{phase} {count} / {total} ({percent}%)',
+  'admin.deleteProgressNoTotal': '{phase}',
+  'admin.deleteFailedWithMessage': '{phase}：{message}',
+  'admin.deleteTaskLabel': '删除图库',
   'scan.indicatorTitle': '扫描任务状态',
   'scan.activeJobs': '正在扫描',
   'scan.imagesCompact': '图片 {count}',
@@ -1410,6 +1428,8 @@ type CountUnit = 'photo' | 'folder' | 'library' | 'account' | 'source' | 'origin
 type StorageLike = Pick<Storage, 'getItem' | 'setItem'>;
 
 const storageKey = 'dk-photo-locale';
+const appTimeZone = 'Asia/Shanghai';
+const appTimeZoneOptions: Intl.DateTimeFormatOptions = { timeZone: appTimeZone };
 const fallbackLocale: Locale = 'en';
 const countUnitKeys: Record<CountUnit, { one: TranslationKey; other: TranslationKey }> = {
   photo: { one: 'common.photoUnit', other: 'common.photosUnit' },
@@ -1476,12 +1496,12 @@ export function useLocale() {
 
   function formatDate(raw: string | number | Date | null | undefined) {
     if (!raw) return t('common.noDate');
-    return new Date(raw).toLocaleDateString(locale.value);
+    return new Date(raw).toLocaleDateString(locale.value, appTimeZoneOptions);
   }
 
   function formatDateTime(raw: string | number | Date | null | undefined, fallback: TranslationKey = 'common.noDate') {
     if (!raw) return t(fallback);
-    return new Date(raw).toLocaleString(locale.value);
+    return new Date(raw).toLocaleString(locale.value, appTimeZoneOptions);
   }
 
   return {

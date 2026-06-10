@@ -15,6 +15,15 @@ export interface Library {
   created_at: string;
   last_scan_at: string | null;
   deleted_at: string | null;
+  delete_status: string | null;
+  delete_phase: string | null;
+  delete_message: string;
+  delete_total_assets: number;
+  delete_processed_assets: number;
+  delete_total_folders: number;
+  delete_processed_folders: number;
+  delete_started_at: string | null;
+  delete_updated_at: string | null;
 }
 
 export interface LibraryUpdate {

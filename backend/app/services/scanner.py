@@ -29,6 +29,7 @@ from app.models import Asset, Folder, LibraryRoot, PhotoAlbum, PhotoAlbumAsset, 
 from app.services.operation_log import log_operation
 from app.services.paths import is_docker_photos_root
 from app.services.resource_limits import MemoryAdmissionController, default_memory_controller
+from app.timezone import assume_app_timezone
 
 
 SUPPORTED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
@@ -343,7 +344,7 @@ def parse_exif_datetime(value: Any) -> datetime | None:
         return None
     for fmt in ("%Y:%m:%d %H:%M:%S", "%Y-%m-%d %H:%M:%S"):
         try:
-            return datetime.strptime(text, fmt)
+            return assume_app_timezone(datetime.strptime(text, fmt))
         except ValueError:
             continue
     return None

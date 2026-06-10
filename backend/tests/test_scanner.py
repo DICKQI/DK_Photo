@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import threading
+from datetime import timedelta
 from pathlib import Path
 
 import pytest
@@ -215,6 +216,14 @@ def test_scan_library_extracts_photo_exif_metadata(tmp_path: Path) -> None:
         assert asset.focal_length == "50 mm"
         assert asset.latitude == 37.8083333
         assert asset.longitude == -122.4041667
+
+
+def test_parse_exif_datetime_assumes_utc_plus_8() -> None:
+    captured_at = scanner.parse_exif_datetime("2024:05:12 10:30:45")
+
+    assert captured_at is not None
+    assert captured_at.utcoffset() == timedelta(hours=8)
+    assert captured_at.hour == 10
 
 
 def test_scan_job_reports_indexed_media_items(tmp_path: Path) -> None:

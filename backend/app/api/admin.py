@@ -8,7 +8,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request, status
 from starlette.responses import StreamingResponse
-from sqlalchemy import delete, func, or_
+from sqlalchemy import delete, func, or_, update
 from sqlmodel import Session, select
 
 from app.config import get_thumb_workers, reset_thumb_workers, set_thumb_workers, settings
@@ -64,6 +64,15 @@ from app.services.scanner import active_scan_job, request_cancel_scan_job, run_s
 
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
+LIBRARY_DELETE_CHUNK_SIZE = 900
+DELETE_STATUS_QUEUED = "queued"
+DELETE_STATUS_RUNNING = "running"
+DELETE_STATUS_FAILED = "failed"
+DELETE_PHASE_COUNTING = "counting"
+DELETE_PHASE_ASSETS = "assets"
+DELETE_PHASE_FOLDERS = "folders"
+DELETE_PHASE_FINALIZING = "finalizing"
+DELETE_PHASE_FAILED = "failed"
 
 
 @router.get("/libraries", response_model=list[LibraryRead])
@@ -170,8 +179,18 @@ def delete_library(
     if active_job:
         request_cancel_scan_job(active_job.id or 0)
 
+    now = utc_now()
     library.is_enabled = False
-    library.deleted_at = utc_now()
+    library.deleted_at = now
+    library.delete_status = DELETE_STATUS_QUEUED
+    library.delete_phase = DELETE_PHASE_COUNTING
+    library.delete_message = "Delete queued"
+    library.delete_total_assets = 0
+    library.delete_processed_assets = 0
+    library.delete_total_folders = 0
+    library.delete_processed_folders = 0
+    library.delete_started_at = now
+    library.delete_updated_at = now
     session.commit()
 
     watcher = getattr(request.app.state, "library_watcher", None)
@@ -204,89 +223,261 @@ def _unlink_thumbnail_file(path: str) -> None:
         return
 
 
+def _chunks(items: list[int], size: int | None = None):
+    chunk_size = size or LIBRARY_DELETE_CHUNK_SIZE
+    for index in range(0, len(items), chunk_size):
+        yield items[index:index + chunk_size]
+
+
+def _id_chunks(session: Session, id_column, condition, size: int | None = None):
+    chunk_size = size or LIBRARY_DELETE_CHUNK_SIZE
+    last_id = 0
+    while True:
+        ids = [
+            item
+            for item in session.exec(
+                select(id_column)
+                .where(condition, id_column > last_id)
+                .order_by(id_column)
+                .limit(chunk_size)
+            ).all()
+            if item is not None
+        ]
+        if not ids:
+            return
+        yield ids
+        last_id = ids[-1]
+
+
+def _delete_orphan_share_links(session: Session, share_ids: set[int]) -> None:
+    for share_id_chunk in _chunks(sorted(share_ids)):
+        for share_id in share_id_chunk:
+            has_assets = session.exec(select(ShareAsset.id).where(ShareAsset.share_id == share_id).limit(1)).first()
+            if not has_assets:
+                session.exec(delete(ShareLink).where(ShareLink.id == share_id))
+
+
+def _set_library_delete_progress(
+    session: Session,
+    library_id: int,
+    *,
+    status: str | None = None,
+    phase: str | None = None,
+    message: str | None = None,
+    total_assets: int | None = None,
+    processed_assets: int | None = None,
+    total_folders: int | None = None,
+    processed_folders: int | None = None,
+    started_at: datetime | None = None,
+) -> LibraryRoot | None:
+    library = session.get(LibraryRoot, library_id)
+    if not library:
+        return None
+    if status is not None:
+        library.delete_status = status
+    if phase is not None:
+        library.delete_phase = phase
+    if message is not None:
+        library.delete_message = message
+    if total_assets is not None:
+        library.delete_total_assets = total_assets
+    if processed_assets is not None:
+        library.delete_processed_assets = processed_assets
+    if total_folders is not None:
+        library.delete_total_folders = total_folders
+    if processed_folders is not None:
+        library.delete_processed_folders = processed_folders
+    if started_at is not None and not library.delete_started_at:
+        library.delete_started_at = started_at
+    library.delete_updated_at = utc_now()
+    session.add(library)
+    return library
+
+
+def _delete_phase_for_counts(asset_count: int, folder_count: int) -> str:
+    if asset_count > 0:
+        return DELETE_PHASE_ASSETS
+    if folder_count > 0:
+        return DELETE_PHASE_FOLDERS
+    return DELETE_PHASE_FINALIZING
+
+
+def _delete_message_for_phase(phase: str) -> str:
+    if phase == DELETE_PHASE_COUNTING:
+        return "Counting media and folders"
+    if phase == DELETE_PHASE_ASSETS:
+        return "Deleting media index and thumbnails"
+    if phase == DELETE_PHASE_FOLDERS:
+        return "Deleting folder index"
+    if phase == DELETE_PHASE_FINALIZING:
+        return "Finalizing library deletion"
+    return "Library deletion failed"
+
+
+def _mark_library_delete_failed(library_id: int, exc: Exception) -> None:
+    from sqlmodel import Session
+
+    from app.db import engine
+
+    message = str(exc) or exc.__class__.__name__
+    with Session(engine) as session:
+        _set_library_delete_progress(
+            session,
+            library_id,
+            status=DELETE_STATUS_FAILED,
+            phase=DELETE_PHASE_FAILED,
+            message=message[:500],
+        )
+        session.commit()
+
+
 def _delete_library_cleanup(library_id: int) -> None:
     from sqlmodel import Session
 
     from app.db import engine
 
-    with Session(engine) as cleanup_session:
-        assets = cleanup_session.exec(select(Asset).where(Asset.library_id == library_id)).all()
-        folders = cleanup_session.exec(select(Folder).where(Folder.library_id == library_id)).all()
-        asset_ids = [a.id for a in assets if a.id is not None]
-        folder_ids = [f.id for f in folders if f.id is not None]
+    try:
+        with Session(engine) as cleanup_session:
+            asset_count = cleanup_session.exec(select(func.count(Asset.id)).where(Asset.library_id == library_id)).one()
+            folder_count = cleanup_session.exec(select(func.count(Folder.id)).where(Folder.library_id == library_id)).one()
+            library = cleanup_session.get(LibraryRoot, library_id)
+            if not library:
+                return
 
-        if asset_ids or folder_ids:
-            share_conditions = []
-            if asset_ids:
-                share_conditions.append(ShareLink.asset_id.in_(asset_ids))  # type: ignore[attr-defined]
-            if folder_ids:
-                share_conditions.append(ShareLink.folder_id.in_(folder_ids))  # type: ignore[attr-defined]
-            shares = cleanup_session.exec(select(ShareLink).where(or_(*share_conditions))).all()
-            for share in shares:
-                cleanup_session.delete(share)
+            processed_assets = min(library.delete_processed_assets or 0, library.delete_total_assets or asset_count)
+            processed_folders = min(library.delete_processed_folders or 0, library.delete_total_folders or folder_count)
+            total_assets = max(library.delete_total_assets or 0, processed_assets + asset_count)
+            total_folders = max(library.delete_total_folders or 0, processed_folders + folder_count)
+            phase = _delete_phase_for_counts(asset_count, folder_count)
+            _set_library_delete_progress(
+                cleanup_session,
+                library_id,
+                status=DELETE_STATUS_RUNNING,
+                phase=phase,
+                message=_delete_message_for_phase(phase),
+                total_assets=total_assets,
+                processed_assets=processed_assets,
+                total_folders=total_folders,
+                processed_folders=processed_folders,
+                started_at=utc_now(),
+            )
+            cleanup_session.commit()
+            affected_share_ids: set[int] = set()
 
-        if asset_ids:
-            for model in (AssetFavorite, AssetTag, AssetMetadata):
-                rows = cleanup_session.exec(select(model).where(model.asset_id.in_(asset_ids))).all()  # type: ignore[attr-defined]
-                for row in rows:
-                    cleanup_session.delete(row)
+            for asset_ids in _id_chunks(cleanup_session, Asset.id, Asset.library_id == library_id):
+                cleanup_session.exec(delete(ShareLink).where(ShareLink.asset_id.in_(asset_ids)))  # type: ignore[attr-defined]
+                for model in (AssetFavorite, AssetTag, AssetMetadata):
+                    cleanup_session.exec(delete(model).where(model.asset_id.in_(asset_ids)))  # type: ignore[attr-defined]
+                cleanup_session.exec(delete(PhotoAlbumAsset).where(PhotoAlbumAsset.asset_id.in_(asset_ids)))  # type: ignore[attr-defined]
+                cleanup_session.exec(
+                    update(PhotoAlbum)
+                    .where(PhotoAlbum.cover_asset_id.in_(asset_ids))  # type: ignore[attr-defined]
+                    .values(cover_asset_id=None)
+                )
+                cleanup_session.exec(
+                    update(Folder)
+                    .where(Folder.cover_asset_id.in_(asset_ids))  # type: ignore[attr-defined]
+                    .values(cover_asset_id=None)
+                )
 
-            album_assets = cleanup_session.exec(select(PhotoAlbumAsset).where(PhotoAlbumAsset.asset_id.in_(asset_ids))).all()  # type: ignore[attr-defined]
-            for aa in album_assets:
-                cleanup_session.delete(aa)
-            cover_albums = cleanup_session.exec(select(PhotoAlbum).where(PhotoAlbum.cover_asset_id.in_(asset_ids))).all()  # type: ignore[attr-defined]
-            for album in cover_albums:
-                album.cover_asset_id = None
+                affected_share_ids.update(
+                    share_id
+                    for share_id in cleanup_session.exec(
+                        select(ShareAsset.share_id).where(ShareAsset.asset_id.in_(asset_ids))  # type: ignore[attr-defined]
+                    ).all()
+                    if share_id is not None
+                )
+                cleanup_session.exec(delete(ShareAsset).where(ShareAsset.asset_id.in_(asset_ids)))  # type: ignore[attr-defined]
 
-            multi_share_assets = cleanup_session.exec(select(ShareAsset).where(ShareAsset.asset_id.in_(asset_ids))).all()
-            affected_share_ids = {sa.share_id for sa in multi_share_assets}
-            for sa in multi_share_assets:
-                cleanup_session.delete(sa)
-            cleanup_session.flush()
-            for sid in affected_share_ids:
-                if not cleanup_session.exec(select(ShareAsset).where(ShareAsset.share_id == sid)).all():
-                    share = cleanup_session.get(ShareLink, sid)
-                    if share:
-                        cleanup_session.delete(share)
+                thumbnails = cleanup_session.exec(
+                    select(Thumbnail.path).where(Thumbnail.asset_id.in_(asset_ids))  # type: ignore[attr-defined]
+                ).all()
+                for path in thumbnails:
+                    _unlink_thumbnail_file(path)
+                cleanup_session.exec(delete(Thumbnail).where(Thumbnail.asset_id.in_(asset_ids)))  # type: ignore[attr-defined]
+                cleanup_session.exec(delete(Asset).where(Asset.id.in_(asset_ids)))  # type: ignore[attr-defined]
+                processed_assets = min(total_assets, processed_assets + len(asset_ids))
+                _set_library_delete_progress(
+                    cleanup_session,
+                    library_id,
+                    status=DELETE_STATUS_RUNNING,
+                    phase=DELETE_PHASE_ASSETS,
+                    message=_delete_message_for_phase(DELETE_PHASE_ASSETS),
+                    processed_assets=processed_assets,
+                    total_assets=total_assets,
+                )
+                cleanup_session.commit()
 
-        if asset_ids:
-            thumbnails = cleanup_session.exec(select(Thumbnail).where(Thumbnail.asset_id.in_(asset_ids))).all()  # type: ignore[attr-defined]
-            for thumb in thumbnails:
-                _unlink_thumbnail_file(thumb.path)
-                cleanup_session.delete(thumb)
+            _delete_orphan_share_links(cleanup_session, affected_share_ids)
+            cleanup_session.exec(
+                update(Folder)
+                .where(Folder.library_id == library_id)
+                .values(cover_asset_id=None, parent_id=None)
+            )
+            next_phase = DELETE_PHASE_FOLDERS if folder_count > 0 else DELETE_PHASE_FINALIZING
+            _set_library_delete_progress(
+                cleanup_session,
+                library_id,
+                status=DELETE_STATUS_RUNNING,
+                phase=next_phase,
+                message=_delete_message_for_phase(next_phase),
+                processed_assets=total_assets,
+                total_assets=total_assets,
+            )
+            cleanup_session.commit()
 
-        for folder in folders:
-            folder.cover_asset_id = None
-            folder.parent_id = None
-        cleanup_session.flush()
+            for folder_ids in _id_chunks(cleanup_session, Folder.id, Folder.library_id == library_id):
+                cleanup_session.exec(delete(ShareLink).where(ShareLink.folder_id.in_(folder_ids)))  # type: ignore[attr-defined]
+                cleanup_session.exec(delete(Folder).where(Folder.id.in_(folder_ids)))  # type: ignore[attr-defined]
+                processed_folders = min(total_folders, processed_folders + len(folder_ids))
+                _set_library_delete_progress(
+                    cleanup_session,
+                    library_id,
+                    status=DELETE_STATUS_RUNNING,
+                    phase=DELETE_PHASE_FOLDERS,
+                    message=_delete_message_for_phase(DELETE_PHASE_FOLDERS),
+                    processed_folders=processed_folders,
+                    total_folders=total_folders,
+                )
+                cleanup_session.commit()
 
-        for perm in cleanup_session.exec(select(LibraryPermission).where(LibraryPermission.library_id == library_id)).all():
-            cleanup_session.delete(perm)
-        for job in cleanup_session.exec(select(ScanJob).where(ScanJob.library_id == library_id)).all():
-            cleanup_session.delete(job)
-        for err in cleanup_session.exec(select(ProcessingError).where(ProcessingError.library_id == library_id)).all():
-            cleanup_session.delete(err)
-        for asset in assets:
-            cleanup_session.delete(asset)
-        for folder in folders:
-            cleanup_session.delete(folder)
-
-        library = cleanup_session.get(LibraryRoot, library_id)
-        if library:
-            cleanup_session.delete(library)
-        cleanup_session.commit()
+            _set_library_delete_progress(
+                cleanup_session,
+                library_id,
+                status=DELETE_STATUS_RUNNING,
+                phase=DELETE_PHASE_FINALIZING,
+                message=_delete_message_for_phase(DELETE_PHASE_FINALIZING),
+                processed_assets=total_assets,
+                processed_folders=total_folders,
+            )
+            cleanup_session.exec(delete(LibraryPermission).where(LibraryPermission.library_id == library_id))
+            cleanup_session.exec(delete(ProcessingError).where(ProcessingError.library_id == library_id))
+            cleanup_session.exec(delete(ScanJob).where(ScanJob.library_id == library_id))
+            cleanup_session.exec(delete(LibraryRoot).where(LibraryRoot.id == library_id))
+            cleanup_session.commit()
+            log_operation(
+                "library.delete.completed",
+                category="task",
+                status="success",
+                target_type="library",
+                target_id=library_id,
+                message="Library deletion cleanup completed",
+                metadata={
+                    "library_id": library_id,
+                    "asset_count": total_assets,
+                    "folder_count": total_folders,
+                },
+            )
+    except Exception as exc:
+        _mark_library_delete_failed(library_id, exc)
         log_operation(
-            "library.delete.completed",
+            "library.delete.failed",
             category="task",
-            status="success",
+            status="failed",
             target_type="library",
             target_id=library_id,
-            message="Library deletion cleanup completed",
-            metadata={
-                "library_id": library_id,
-                "asset_count": len(assets),
-                "folder_count": len(folders),
-            },
+            message="Library deletion cleanup failed",
+            metadata={"library_id": library_id, "error": (str(exc) or exc.__class__.__name__)[:500]},
         )
 
 

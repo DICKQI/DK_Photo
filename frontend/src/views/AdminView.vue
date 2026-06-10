@@ -146,6 +146,7 @@
             <div class="row-actions">
               <template v-if="library.deleted_at">
                 <small class="status-pill active">{{ t('admin.deletingLibrary') }}</small>
+                <small class="muted scan-progress-detail">{{ deleteProgressLabel(library, t) }}</small>
               </template>
               <template v-else>
                 <small class="status-pill neutral">{{ library.last_scan_at ? formatDateTime(library.last_scan_at) : t('common.neverScanned') }}</small>
@@ -442,7 +443,7 @@
         <header>
           <h2>{{ t('admin.scanJobs') }}</h2>
         </header>
-        <div v-if="!jobs.length" class="panel-empty">
+        <div v-if="!backgroundTasks.length" class="panel-empty">
           <ScanLine :size="24" />
           <strong>{{ t('admin.noScanJobs') }}</strong>
           <span>{{ t('admin.noScanJobsHint') }}</span>
@@ -461,44 +462,44 @@
               <button :class="{ active: jobStatusFilter === 'failed' }" @click="jobStatusFilter = 'failed'">{{ t('admin.statusFailed') }}</button>
             </div>
           </div>
-          <div v-if="!filteredJobs.length" class="panel-empty">
+          <div v-if="!filteredTasks.length" class="panel-empty">
             <Search :size="24" />
             <strong>{{ t('admin.noMatchingScanJobs') }}</strong>
             <span>{{ t('admin.noMatchingScanJobsHint') }}</span>
           </div>
           <div v-else class="table-list scrollable">
-            <div v-for="job in filteredJobs" :key="job.id" class="table-row" :class="{ 'failed-row': job.status === 'failed', 'running-row': job.status === 'running' || job.status === 'queued' }">
+            <div v-for="task in filteredTasks" :key="task.key" class="table-row" :class="{ 'failed-row': task.status === 'failed', 'running-row': task.status === 'running' || task.status === 'queued' }">
               <div class="row-title">
-                <span class="row-icon" :class="jobStatusClass(job.status)">
-                  <LoaderCircle v-if="job.status === 'running' || job.status === 'queued'" class="spin" :size="20" />
-                  <CircleCheck v-else-if="job.status === 'completed'" :size="20" />
-                  <CircleAlert v-else-if="job.status === 'failed'" :size="20" />
+                <span class="row-icon" :class="jobStatusClass(task.status)">
+                  <LoaderCircle v-if="task.status === 'running' || task.status === 'queued'" class="spin" :size="20" />
+                  <CircleCheck v-else-if="task.status === 'completed'" :size="20" />
+                  <CircleAlert v-else-if="task.status === 'failed'" :size="20" />
                   <CircleCheck v-else :size="20" />
                 </span>
                 <div>
-                  <strong>#{{ job.id }} - {{ job.library_id ? libraryNameById(job.library_id) : t('admin.summaryLibraries') }}</strong>
-                  <span>{{ job.message || t('common.waiting') }}</span>
+                  <strong>{{ task.title }}</strong>
+                  <span>{{ task.message || t('common.waiting') }}</span>
                 </div>
               </div>
               <div class="row-actions">
-                <small class="status-pill" :class="jobStatusClass(job.status)">{{ jobStatusLabel(job.status) }}</small>
+                <small class="status-pill" :class="jobStatusClass(task.status)">{{ jobStatusLabel(task.status) }}</small>
                 <button
-                  v-if="job.status === 'running' || job.status === 'queued'"
+                  v-if="task.kind === 'scan' && (task.status === 'running' || task.status === 'queued')"
                   class="icon-button danger"
                   :title="t('admin.cancelScan')"
-                  :disabled="isBusy(cancelJobKey(job.id))"
-                  @click="cancelScan(job.id)"
+                  :disabled="task.scanJob ? isBusy(cancelJobKey(task.scanJob.id)) : true"
+                  @click="task.scanJob && cancelScan(task.scanJob.id)"
                 >
-                  <LoaderCircle v-if="isBusy(cancelJobKey(job.id))" class="spin" :size="16" />
+                  <LoaderCircle v-if="task.scanJob && isBusy(cancelJobKey(task.scanJob.id))" class="spin" :size="16" />
                   <Ban v-else :size="16" />
                 </button>
-                <small v-if="job.status === 'running' || job.status === 'queued'" class="scan-progress-main">
+                <small v-if="task.status === 'running' || task.status === 'queued'" class="scan-progress-main">
                   <LoaderCircle class="spin" :size="12" />
-                  {{ scanMediaProgressLabel(job) }}
+                  {{ task.progress }}
                 </small>
-                <small v-else>{{ scanMediaProgressLabel(job) }}</small>
-                <small v-if="hasScanBreakdown(job)" class="muted scan-progress-detail">{{ scanBreakdownLabel(job) }}</small>
-                <small class="muted">{{ jobTimeLabel(job) }}</small>
+                <small v-else>{{ task.progress }}</small>
+                <small v-if="task.detail" class="muted scan-progress-detail">{{ task.detail }}</small>
+                <small class="muted">{{ task.timeLabel }}</small>
               </div>
             </div>
           </div>
@@ -810,6 +811,7 @@ import DirectoryPicker from '../components/DirectoryPicker.vue';
 import LanguageToggle from '../components/LanguageToggle.vue';
 import LogViewer from '../components/LogViewer.vue';
 import ManagementNav from '../components/ManagementNav.vue';
+import { deleteProgressLabel } from '../composables/deleteProgress';
 import { useLocale } from '../composables/useLocale';
 import { useTheme } from '../composables/useTheme';
 import { api } from '../services/api';
@@ -872,6 +874,18 @@ const permissionBuffer = reactive<Record<number, { can_view: boolean; can_share:
 let messageTimer: ReturnType<typeof setTimeout> | null = null;
 
 type AdminModule = 'users' | 'libraries' | 'tools' | 'settings';
+type BackgroundTask = {
+  key: string;
+  kind: 'scan' | 'delete';
+  status: string;
+  title: string;
+  message: string;
+  progress: string;
+  detail: string;
+  timeLabel: string;
+  searchText: string;
+  scanJob?: ScanJob;
+};
 
 const activeModule = computed<AdminModule>(() => {
   if (route.name === 'admin-users') return 'users';
@@ -893,6 +907,9 @@ const deletingLibraryCount = computed(() => libraries.value.filter((lib) => lib.
 const activeShareCount = computed(() => shares.value.filter((share) => !share.revoked_at && !isShareExpired(share)).length);
 const isWorking = computed(() => Object.keys(busyKeys).length > 0);
 const permissionLoading = computed(() => (permissionUser.value ? isBusy(permissionLoadKey(permissionUser.value.id)) : false));
+const deleteTaskRows = computed<BackgroundTask[]>(() => libraries.value.filter((library) => library.deleted_at).map(deleteTaskFromLibrary));
+const scanTaskRows = computed<BackgroundTask[]>(() => jobs.value.map(scanTaskFromJob));
+const backgroundTasks = computed<BackgroundTask[]>(() => [...deleteTaskRows.value, ...scanTaskRows.value]);
 const filteredLibraries = computed(() => {
   const query = librarySearch.value.trim().toLowerCase();
   if (!query) return libraries.value;
@@ -918,11 +935,11 @@ const filteredShares = computed(() => {
     return matchesQuery && matchesStatus;
   });
 });
-const filteredJobs = computed(() => {
+const filteredTasks = computed(() => {
   const query = jobSearch.value.trim().toLowerCase();
-  return jobs.value.filter((job) => {
-    const matchesStatus = jobStatusFilter.value === 'all' || job.status === jobStatusFilter.value;
-    const matchesQuery = !query || jobSearchText(job).includes(query);
+  return backgroundTasks.value.filter((task) => {
+    const matchesStatus = jobStatusFilter.value === 'all' || task.status === jobStatusFilter.value;
+    const matchesQuery = !query || task.searchText.includes(query);
     return matchesStatus && matchesQuery;
   });
 });
@@ -1438,8 +1455,48 @@ function libraryNameById(libraryId: number) {
   return libraries.value.find((library) => library.id === libraryId)?.name ?? t('admin.libraryFallback', { id: libraryId });
 }
 
+function deleteTaskStatus(library: Library) {
+  return library.delete_status || 'running';
+}
+
+function deleteTaskFromLibrary(library: Library): BackgroundTask {
+  const progress = deleteProgressLabel(library, t);
+  const status = deleteTaskStatus(library);
+  const timeLabel = library.delete_started_at ? t('admin.jobStarted', { time: formatDateTime(library.delete_started_at) }) : t('common.notStarted');
+  const title = `${t('admin.deleteTaskLabel')} - ${library.name}`;
+  return {
+    key: `delete:${library.id}`,
+    kind: 'delete',
+    status,
+    title,
+    message: library.path,
+    progress,
+    detail: library.delete_message || '',
+    timeLabel,
+    searchText: [title, library.path, status, jobStatusLabel(status), progress, library.delete_message || ''].join(' ').toLowerCase(),
+  };
+}
+
+function scanTaskFromJob(job: ScanJob): BackgroundTask {
+  const progress = scanMediaProgressLabel(job);
+  const detail = hasScanBreakdown(job) ? scanBreakdownLabel(job) : '';
+  const title = `#${job.id} - ${job.library_id ? libraryNameById(job.library_id) : t('admin.summaryLibraries')}`;
+  return {
+    key: `scan:${job.id}`,
+    kind: 'scan',
+    status: job.status,
+    title,
+    message: job.message || t('common.waiting'),
+    progress,
+    detail,
+    timeLabel: jobTimeLabel(job),
+    searchText: jobSearchText(job),
+    scanJob: job,
+  };
+}
+
 function librarySearchText(library: Library) {
-  const status = library.deleted_at ? t('admin.deletingLibrary') : (library.last_scan_at ? formatDateTime(library.last_scan_at) : t('common.neverScanned'));
+  const status = library.deleted_at ? `${t('admin.deletingLibrary')} ${deleteProgressLabel(library, t)}` : (library.last_scan_at ? formatDateTime(library.last_scan_at) : t('common.neverScanned'));
   return [library.name, library.path, status].join(' ').toLowerCase();
 }
 
@@ -1717,7 +1774,7 @@ function errorTypeLabel(type: string) {
 function formatErrorTime(ts: string) {
   const d = new Date(ts);
   if (Number.isNaN(d.getTime())) return ts;
-  return d.toLocaleString();
+  return formatDateTime(d);
 }
 
 const filteredErrors = computed(() => processingErrors.value);
