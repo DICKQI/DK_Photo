@@ -68,11 +68,16 @@ def run_lightweight_migrations() -> None:
         "focal_length": "ALTER TABLE asset ADD COLUMN focal_length VARCHAR",
         "latitude": "ALTER TABLE asset ADD COLUMN latitude REAL",
         "longitude": "ALTER TABLE asset ADD COLUMN longitude REAL",
+        "last_scanned_at": "ALTER TABLE asset ADD COLUMN last_scanned_at DATETIME",
     }
     with engine.begin() as connection:
         for column, statement in asset_migrations.items():
             if column not in asset_columns:
                 connection.execute(text(statement))
+    folder_columns = {column["name"] for column in inspector.get_columns("folder")} if inspector.has_table("folder") else set()
+    if "last_scanned_at" not in folder_columns:
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE folder ADD COLUMN last_scanned_at DATETIME"))
     album_columns = {column["name"] for column in inspector.get_columns("photoalbum")} if inspector.has_table("photoalbum") else set()
     if "cover_asset_id" not in album_columns:
         with engine.begin() as connection:
@@ -99,6 +104,16 @@ def run_lightweight_migrations() -> None:
     if "ix_asset_library_path" not in asset_indexes:
         with engine.begin() as connection:
             connection.execute(text("CREATE INDEX IF NOT EXISTS ix_asset_library_path ON asset(library_id, path)"))
+    if "ix_asset_library_scanned" not in asset_indexes:
+        with engine.begin() as connection:
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_asset_library_scanned ON asset(library_id, last_scanned_at)"))
+    folder_indexes = {index["name"] for index in inspector.get_indexes("folder")} if inspector.has_table("folder") else set()
+    if "ix_folder_library_path" not in folder_indexes:
+        with engine.begin() as connection:
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_folder_library_path ON folder(library_id, path)"))
+    if "ix_folder_library_scanned" not in folder_indexes:
+        with engine.begin() as connection:
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_folder_library_scanned ON folder(library_id, last_scanned_at)"))
     library_columns = {column["name"] for column in inspector.get_columns("libraryroot")} if inspector.has_table("libraryroot") else set()
     if "deleted_at" not in library_columns:
         with engine.begin() as connection:
@@ -125,6 +140,10 @@ def run_lightweight_migrations() -> None:
     if "file_size" not in thumbnail_columns:
         with engine.begin() as connection:
             connection.execute(text("ALTER TABLE thumbnail ADD COLUMN file_size INTEGER"))
+    thumbnail_indexes = {index["name"] for index in inspector.get_indexes("thumbnail")} if inspector.has_table("thumbnail") else set()
+    if "ix_thumbnail_asset_size" not in thumbnail_indexes:
+        with engine.begin() as connection:
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_thumbnail_asset_size ON thumbnail(asset_id, size)"))
     processingerror_columns = {column["name"] for column in inspector.get_columns("processingerror")} if inspector.has_table("processingerror") else set()
     if not processingerror_columns:
         with engine.begin() as connection:

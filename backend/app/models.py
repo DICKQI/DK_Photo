@@ -53,6 +53,11 @@ class LibraryRoot(SQLModel, table=True):
 
 
 class Folder(SQLModel, table=True):
+    __table_args__ = (
+        Index("ix_folder_library_path", "library_id", "path"),
+        Index("ix_folder_library_scanned", "library_id", "last_scanned_at"),
+    )
+
     id: Optional[int] = Field(default=None, primary_key=True)
     library_id: int = Field(foreign_key="libraryroot.id", index=True)
     parent_id: Optional[int] = Field(default=None, foreign_key="folder.id", index=True)
@@ -61,6 +66,7 @@ class Folder(SQLModel, table=True):
     photo_count: int = Field(default=0)
     folder_count: int = Field(default=0)
     cover_asset_id: Optional[int] = Field(default=None, foreign_key="asset.id")
+    last_scanned_at: Optional[datetime] = Field(default=None, sa_type=UTCDateTime)
     updated_at: datetime = Field(default_factory=utc_now, sa_type=UTCDateTime)
 
 
@@ -69,6 +75,7 @@ class Asset(SQLModel, table=True):
         Index("ix_asset_library_folder_mime", "library_id", "folder_id", "mime_type"),
         Index("ix_asset_captured_at", "captured_at"),
         Index("ix_asset_library_path", "library_id", "path"),
+        Index("ix_asset_library_scanned", "library_id", "last_scanned_at"),
     )
 
     id: Optional[int] = Field(default=None, primary_key=True)
@@ -91,6 +98,7 @@ class Asset(SQLModel, table=True):
     focal_length: Optional[str] = None
     latitude: Optional[float] = None
     longitude: Optional[float] = None
+    last_scanned_at: Optional[datetime] = Field(default=None, sa_type=UTCDateTime)
     created_at: datetime = Field(default_factory=utc_now, sa_type=UTCDateTime)
     updated_at: datetime = Field(default_factory=utc_now, sa_type=UTCDateTime)
 
@@ -145,6 +153,8 @@ class PhotoAlbumAsset(SQLModel, table=True):
 
 
 class Thumbnail(SQLModel, table=True):
+    __table_args__ = (Index("ix_thumbnail_asset_size", "asset_id", "size"),)
+
     id: Optional[int] = Field(default=None, primary_key=True)
     asset_id: int = Field(foreign_key="asset.id", index=True)
     size: str = Field(index=True)

@@ -7,10 +7,11 @@ from pathlib import Path
 
 import pytest
 from PIL import ExifTags, Image, TiffImagePlugin
+from sqlalchemy import inspect, text
 from sqlmodel import Session, SQLModel, create_engine, select
 
 from app.config import settings
-from app.db import disable_legacy_docker_photos_root_library, mark_interrupted_scan_jobs
+from app.db import disable_legacy_docker_photos_root_library, mark_interrupted_scan_jobs, run_lightweight_migrations
 from app.models import Asset, Folder, LibraryRoot, ProcessingError, ScanJob, Thumbnail
 from app.services import scanner
 from app.services.scanner import (
@@ -299,6 +300,145 @@ def test_mark_interrupted_scan_jobs_clears_startup_leftovers(tmp_path: Path) -> 
         assert jobs[0].message == "Interrupted by server restart"
         assert jobs[1].finished_at is not None
         assert jobs[2].message == "Done"
+
+
+def test_lightweight_migrations_add_scan_marker_columns_and_indexes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from app import db as app_db
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'scan-marker-migration.sqlite3'}", connect_args={"check_same_thread": False})
+    SQLModel.metadata.create_all(engine)
+    with engine.begin() as connection:
+        connection.execute(text("DROP TABLE asset"))
+        connection.execute(text("DROP TABLE folder"))
+        connection.execute(text("DROP TABLE thumbnail"))
+        connection.execute(
+            text(
+                """
+                CREATE TABLE folder (
+                    id INTEGER PRIMARY KEY,
+                    library_id INTEGER NOT NULL,
+                    parent_id INTEGER,
+                    path VARCHAR NOT NULL,
+                    name VARCHAR NOT NULL,
+                    photo_count INTEGER NOT NULL DEFAULT 0,
+                    folder_count INTEGER NOT NULL DEFAULT 0,
+                    cover_asset_id INTEGER,
+                    updated_at DATETIME NOT NULL
+                )
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
+                CREATE TABLE asset (
+                    id INTEGER PRIMARY KEY,
+                    library_id INTEGER NOT NULL,
+                    folder_id INTEGER NOT NULL,
+                    filename VARCHAR NOT NULL,
+                    path VARCHAR NOT NULL,
+                    mime_type VARCHAR NOT NULL,
+                    width INTEGER,
+                    height INTEGER,
+                    size INTEGER NOT NULL DEFAULT 0,
+                    mtime FLOAT NOT NULL,
+                    captured_at DATETIME,
+                    created_at DATETIME NOT NULL,
+                    updated_at DATETIME NOT NULL
+                )
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
+                CREATE TABLE thumbnail (
+                    id INTEGER PRIMARY KEY,
+                    asset_id INTEGER NOT NULL,
+                    size VARCHAR NOT NULL,
+                    path VARCHAR NOT NULL,
+                    width INTEGER NOT NULL,
+                    height INTEGER NOT NULL,
+                    created_at DATETIME NOT NULL
+                )
+                """
+            )
+        )
+    monkeypatch.setattr(app_db, "engine", engine)
+
+    run_lightweight_migrations()
+
+    asset_columns = {column["name"] for column in inspect(engine).get_columns("asset")}
+    folder_columns = {column["name"] for column in inspect(engine).get_columns("folder")}
+    assert "last_scanned_at" in asset_columns
+    assert "last_scanned_at" in folder_columns
+
+    asset_indexes = {index["name"] for index in inspect(engine).get_indexes("asset")}
+    folder_indexes = {index["name"] for index in inspect(engine).get_indexes("folder")}
+    thumbnail_indexes = {index["name"] for index in inspect(engine).get_indexes("thumbnail")}
+    assert "ix_asset_library_scanned" in asset_indexes
+    assert "ix_folder_library_scanned" in folder_indexes
+    assert "ix_folder_library_path" in folder_indexes
+    assert "ix_thumbnail_asset_size" in thumbnail_indexes
+
+
+def test_scan_library_marks_seen_rows_and_deletes_stale_by_scan_marker(tmp_path: Path) -> None:
+    photo_root = tmp_path / "scan-marker"
+    create_photo(photo_root / "keep.jpg")
+    create_photo(photo_root / "remove.jpg")
+
+    with make_session(tmp_path) as session:
+        library = LibraryRoot(name="Scan Marker", path=str(photo_root.resolve()))
+        session.add(library)
+        session.commit()
+        session.refresh(library)
+
+        assert scan_library(session, library.id or 0) == 2
+        first_assets = session.exec(select(Asset).order_by(Asset.path)).all()
+        assert all(asset.last_scanned_at is not None for asset in first_assets)
+        first_marker = {asset.path: asset.last_scanned_at for asset in first_assets}
+
+        (photo_root / "remove.jpg").unlink()
+
+        assert scan_library(session, library.id or 0) == 1
+        assets = session.exec(select(Asset)).all()
+        assert [asset.path for asset in assets] == ["keep.jpg"]
+        assert assets[0].last_scanned_at is not None
+        assert assets[0].last_scanned_at != first_marker["keep.jpg"]
+        folders = session.exec(select(Folder)).all()
+        assert folders
+        assert all(folder.last_scanned_at is not None for folder in folders)
+
+
+def test_scan_library_removes_duplicate_asset_paths_with_scan_marker(tmp_path: Path) -> None:
+    photo_root = tmp_path / "duplicate-paths"
+    create_photo(photo_root / "one.jpg")
+
+    with make_session(tmp_path) as session:
+        library = LibraryRoot(name="Duplicate Paths", path=str(photo_root.resolve()))
+        session.add(library)
+        session.commit()
+        session.refresh(library)
+        assert scan_library(session, library.id or 0) == 1
+        asset = session.exec(select(Asset)).one()
+
+        duplicate = Asset(
+            library_id=library.id or 0,
+            folder_id=asset.folder_id,
+            filename="one-copy.jpg",
+            path="one.jpg",
+            mime_type=asset.mime_type,
+            size=asset.size,
+            mtime=asset.mtime,
+        )
+        session.add(duplicate)
+        session.commit()
+
+        assert scan_library(session, library.id or 0) == 1
+
+        assets = session.exec(select(Asset)).all()
+        assert len(assets) == 1
+        assert assets[0].path == "one.jpg"
 
 
 def test_cancelled_scan_does_not_delete_unvisited_assets(tmp_path: Path) -> None:
@@ -618,6 +758,53 @@ def test_pipeline_skips_unchanged_images(tmp_path: Path) -> None:
             assert updated is not None
             assert updated.processed_images == 1
             assert updated.thumbnail_ready_images == 1
+    finally:
+        object.__setattr__(settings, "data_dir", old_data_dir)
+
+
+def test_pipeline_does_not_count_thumbnail_ready_when_one_size_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.services import thumbnails
+
+    old_data_dir = settings.data_dir
+    object.__setattr__(settings, "data_dir", (tmp_path / "data").resolve())
+    real_generate = thumbnails.generate_thumbnail_disk_only
+
+    def fail_medium_once(**kwargs):
+        if kwargs["size"] == "medium":
+            return {
+                "error": True,
+                "asset_id": kwargs["asset_id"],
+                "size": kwargs["size"],
+                "asset_path": kwargs["asset_path"],
+                "message": "forced medium failure",
+            }
+        return real_generate(**kwargs)
+
+    monkeypatch.setattr(thumbnails, "generate_thumbnail_disk_only", fail_medium_once)
+    try:
+        photo_root = tmp_path / "pipeline-thumb-error"
+        create_photo(photo_root / "one.jpg")
+
+        with make_session(tmp_path) as session:
+            library = LibraryRoot(name="Pipeline Thumb Error", path=str(photo_root.resolve()))
+            session.add(library)
+            session.commit()
+            session.refresh(library)
+            job = ScanJob(library_id=library.id or 0, status="running", message="Thumbs")
+            session.add(job)
+            session.commit()
+            session.refresh(job)
+
+            scan_library(session, library.id or 0, job=job, generate_thumbnails=True)
+
+            updated = session.get(ScanJob, job.id or 0)
+            assert updated is not None
+            assert updated.thumbnail_ready_images == 0
+            thumbnails_in_db = session.exec(select(Thumbnail)).all()
+            assert {thumbnail.size for thumbnail in thumbnails_in_db} == {"small"}
     finally:
         object.__setattr__(settings, "data_dir", old_data_dir)
 
